@@ -1,0 +1,18 @@
+{
+  "name": "agent-relay-server",
+  "version": "0.1.0",
+  "description": "Multi-agent relay for the Home Assistant sidebar (Paperclip x buzz style)",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

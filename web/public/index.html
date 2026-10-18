@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Relay</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ══ Sidebar ═══════════════════════════════════════════════ -->
+    <aside id="sidebar">
+      <header class="side-head">
+        <div class="brand"><span class="brand-glyph">⌁</span> <span id="brandName">Agent Relay</span></div>
+      </header>
+
+      <nav class="nav" id="mainNav">
+        <button class="nav-btn active" data-view="chat">💬 Chats</button>
+        <button class="nav-btn" data-view="agents">🤖 Agents</button>
+        <button class="nav-btn" data-view="projects">🗂 Projekte</button>
+        <button class="nav-btn" data-view="settings">⚙️ Einstellungen</button>
+      </nav>
+
+      <!-- Room list -->
+      <div class="roomlist" id="roomList"></div>
+      <button id="newRoomBtn" class="fab">＋ Neuer Raum</button>
+
+      <footer class="side-foot" id="connState">
+        <span class="dot" id="connDot"></span> <span id="connText">verbinde…</span>
+      </footer>
+    </aside>
+
+    <!-- ══ Main ═══════════════════════════════════════════════════ -->
+    <main id="main">
+      <!-- Chat view -->
+      <section class="view" id="view-chat">
+        <header class="chat-head" id="chatHead">
+          <h2 id="activeRoomName">Kein Raum gewählt</h2>
+          <div id="roomMembers"></div>
+        </header>
+        <div class="messages" id="messages">
+          <div class="empty-state" id="emptyState">
+            <p>Erstelle einen Raum, füge Agents hinzu und schreibe die erste Nachricht.</p>
+            <p class="hint">Tipp: <code>@agentname</code> im Text ruft gezielt einen Agent auf.</p>
+          </div>
+        </div>
+        <div class="typing" id="typingBar"></div>
+        <form class="composer" id="composer">
+          <textarea id="composerInput" placeholder="Nachricht an alle Agents im Raum…" rows="2"></textarea>
+          <button type="submit" title="Senden">➤</button>
+        </form>
+      </section>
+
+      <!-- Agents view -->
+      <section class="view" id="view-agents" hidden>
+        <header class="view-head">
+          <h2>Agents</h2>
+          <button id="newAgentBtn" class="btn accent">＋ Agent anlegen</button>
+        </header>
+        <div class="cards" id="agentCards"></div>
+      </section>
+
+      <!-- Projects view -->
+      <section class="view" id="view-projects" hidden>
+        <header class="view-head">
+          <h2>Projekte</h2>
+          <button id="newProjectBtn" class="btn accent">＋ Projekt anlegen</button>
+        </header>
+        <div id="projectBoard"></div>
+      </section>
+
+      <!-- Settings view -->
+      <section class="view" id="view-settings" hidden>
+        <header class="view-head"><h2>Einstellungen</h2></header>
+        <form class="settings" id="settingsForm">
+          <label>Relay-Name <input name="relayName" /></label>
+          <label>OpenClaw / LLM Basis-URL
+            <input name="openclawBaseUrl" placeholder="http://host:18789/v1" />
+          </label>
+          <label>Bearer-Token (optional)
+            <input name="openclawToken" type="password" placeholder="nur im LAN-Modus" />
+          </label>
+          <div class="hint">Für OpenClaw: Gateway-HTTP freischalten
+            (<code>gateway.http.endpoints.chatCompletions.enabled</code>) und Agent-Ziele wie
+            <code>openclaw/&lt;agentId&gt;</code> als Modell nutzen.</div>
+          <button class="btn accent" type="submit">Speichern</button>
+          <span id="settingsSaved" class="okmark"></span>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- ══ Modals ═══════════════════════════════════════════════════ -->
+  <dialog id="modal"></dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
