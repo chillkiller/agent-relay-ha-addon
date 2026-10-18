@@ -2,109 +2,129 @@
 <html lang="de">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Agent Relay</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div id="app">
-    <!-- ══ Sidebar ═══════════════════════════════════════════════ -->
+    <!-- ═══════════ Sidebar (Control-UI-DNA: Navigation oben, Gruppen unten) ═══════════ -->
     <aside id="sidebar">
       <header class="side-head">
-        <div class="brand"><span class="brand-glyph">⌁</span> <span id="brandName">Agent Relay</span></div>
+        <div class="brand"><span class="brand-glyph">⌁</span><span id="brandName">Agent Relay</span></div>
       </header>
 
-      <nav class="nav" id="mainNav">
-        <button class="nav-btn active" data-view="chat">💬 Räume</button>
-        <button class="nav-btn" data-view="agents">🤖 Agents</button>
-        <button class="nav-btn" data-view="projects">🗂 Projekte</button>
-        <button class="nav-btn" data-view="settings">⚙️ Einstellungen</button>
+      <nav class="nav" id="mainNav" aria-label="Hauptnavigation">
+        <button class="nav-btn active" data-view="chat"><span class="nav-ico">💬</span>Räume</button>
+        <button class="nav-btn" data-view="agents"><span class="nav-ico">🤖</span>Agents</button>
+        <button class="nav-btn" data-view="projects"><span class="nav-ico">🗂</span>Projekte</button>
+        <button class="nav-btn" data-view="settings"><span class="nav-ico">⚙️</span>Einstellungen</button>
       </nav>
 
-      <!-- Room list -->
-      <div class="roomlist" id="roomList"></div>
-      <button id="newRoomBtn" class="fab">＋ Neuer Raum</button>
-
-      <!-- Roster: agents + you — drag source for room membership -->
-      <div class="roster" id="roster">
-        <div class="roster-title">Teilnehmer</div>
-        <div class="roster-list" id="rosterList"></div>
+      <div class="roomscroll" id="roomScroll">
+        <div class="roomlist" id="roomList"></div>
       </div>
 
-      <footer class="side-foot" id="connState">
-        <span class="dot" id="connDot"></span> <span id="connText">verbinde…</span>
+      <!-- Team-Roster: Drag-Quelle für Raumbeteiligung -->
+      <div class="roster" id="roster">
+        <div class="roster-title">Team</div>
+        <div class="roster-list" id="rosterList"></div>
+        <button id="newAgentQuick" class="roster-add" title="Neuen Agent anlegen">＋ Agent</button>
+      </div>
+
+
+      <footer class="side-foot">
+        <span class="dot" id="connDot" aria-hidden="true"></span>
+        <span id="connText">verbinde…</span>
+        <button id="newRoomBtn" class="mini-cta" title="Neuen Raum anlegen">＋ Raum</button>
       </footer>
     </aside>
 
-    <!-- ══ Main ═══════════════════════════════════════════════════ -->
+    <!-- ═══════════ Main ═══════════ -->
     <main id="main">
-      <!-- Chat view (chat rooms AND project rooms — board is a tab) -->
+      <!-- Räume (Chat + Projekt-Board als Tabs) -->
       <section class="view" id="view-chat">
-        <header class="chat-head" id="chatHead">
+        <header class="chat-head">
           <div class="chat-head-row">
-            <button id="burger" aria-label="Menü" style="display:none">☰</button>
+            <button id="burger" class="icon-btn" aria-label="Menü">☰</button>
+            <span class="room-ico" id="activeRoomIco">#</span>
             <h2 id="activeRoomName">Kein Raum gewählt</h2>
-            <nav class="room-tabs" id="roomTabs" style="display:none">
+            <nav class="room-tabs" id="roomTabs" aria-label="Raumansichten" style="display:none">
               <button class="room-tab active" data-tab="chat">Chat</button>
               <button class="room-tab" data-tab="board">Board</button>
             </nav>
+            <button id="memberAdd" class="icon-btn" title="Agent einladen" aria-haspopup="true">＋</button>
+            <button id="roomMenu" class="icon-btn" title="Raummenü" aria-haspopup="true">⋯</button>
           </div>
-          <div id="roomMembers"></div>
+          <div class="member-row" id="memberRow">
+            <div class="member-chips" id="memberChips"></div>
+            <div class="typing" id="typingBar" aria-live="polite"></div>
+          </div>
         </header>
-        <div class="messages" id="messages">
-          <div class="empty-state" id="emptyState">
-            <p>Erstelle einen Raum, füge Agents hinzu und schreibe die erste Nachricht.</p>
-            <p class="hint">Tipp: <code>@agentname</code> im Text ruft gezielt einen Agent auf.</p>
-          </div>
-        </div>
-        <div class="typing" id="typingBar"></div>
-        <form class="composer" id="composer">
-          <textarea id="composerInput" placeholder="Nachricht in den Raum…" rows="2"></textarea>
-          <button type="submit" title="Senden">➤</button>
+
+        <div class="messages" id="messages" tabindex="0"></div>
+
+        <!-- Board-Tab-Fläche (Projekt-Räume) -->
+        <div class="inline-board" id="inlineBoard" hidden></div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <div class="mention-pop" id="mentionPop" hidden></div>
+          <textarea id="composerInput" rows="1" placeholder="Nachricht in den Raum…  (@Agent ruft gezielt auf)" aria-label="Nachricht"></textarea>
+          <button type="submit" id="composerSend" title="Senden" aria-label="Senden" disabled>➤</button>
         </form>
       </section>
 
-      <!-- Agents view -->
+      <!-- Agents (Team-Verwaltung) -->
       <section class="view" id="view-agents" hidden>
         <header class="view-head">
           <h2>Agents</h2>
-          <button id="newAgentBtn" class="btn accent">＋ Agent anlegen</button>
+          <button id="newAgentBtn" class="btn primary">＋ Agent anlegen</button>
         </header>
         <div class="cards" id="agentCards"></div>
       </section>
 
-      <!-- Projects view -->
+      <!-- Projekte (Launcher für Projekt-Räume) -->
       <section class="view" id="view-projects" hidden>
         <header class="view-head">
           <h2>Projekte</h2>
-          <button id="newProjectBtn" class="btn accent">＋ Projekt anlegen</button>
+          <button id="newProjectBtn" class="btn primary">＋ Projekt-Raum</button>
         </header>
-        <div id="projectBoard"></div>
+        <div class="proj-grid" id="projectList"></div>
       </section>
 
-      <!-- Settings view -->
+      <!-- Einstellungen -->
       <section class="view" id="view-settings" hidden>
         <header class="view-head"><h2>Einstellungen</h2></header>
-        <form class="settings" id="settingsForm">
-          <label>Relay-Name <input name="relayName" /></label>
-          <label>OpenClaw / LLM Basis-URL
-            <input name="openclawBaseUrl" placeholder="http://host:18789/v1" />
-          </label>
-          <label>Gateway-Token (optional)
-            <input name="openclawToken" type="password" placeholder="Bearer für das LLM-Gateway" />
-          </label>
-          <div class="hint">Für OpenClaw: Gateway-HTTP freischalten
-            (<code>gateway.http.endpoints.chatCompletions.enabled</code>) und Agent-Ziele wie
-            <code>openclaw/&lt;agentId&gt;</code> als Modell nutzen.</div>
-          <button class="btn accent" type="submit">Speichern</button>
-          <span id="settingsSaved" class="okmark"></span>
+        <form class="settings" id="settingsForm" autocomplete="off">
+          <fieldset>
+            <legend>Allgemein</legend>
+            <label>Relay-Name
+              <input name="relayName" placeholder="Agent Relay" />
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>LLM-Gateway</legend>
+            <label>Basis-URL (OpenAI-kompatibel)
+              <input name="openclawBaseUrl" placeholder="http://127.0.0.1:18789/v1" />
+            </label>
+            <label>Gateway-Token <span class="lab-hint">(write-only — leer lassen = unverändert)</span>
+              <input name="openclawToken" type="password" placeholder="••••••" />
+            </label>
+            <p class="hint">Agents mit leerer eigener Basis-URL erben diese Einstellung. Für die native OpenClaw-Anbindung: Raum-Agent mit Adapter <code>openclaw</code> und URL <code>ws://&lt;gateway&gt;:18789</code>.</p>
+          </fieldset>
+          <div class="settings-foot">
+            <button class="btn primary" type="submit">Speichern</button>
+            <span id="settingsSaved" class="okmark" role="status"></span>
+          </div>
         </form>
       </section>
     </main>
   </div>
 
-  <!-- ══ Modals ═══════════════════════════════════════════════════ -->
-  <dialog id="modal"></dialog>
+  <!-- Menü-Layer (Popovers für Member-Add / Raummenü) -->
+  <div id="popLayer" hidden></div>
+  <!-- Modal -->
+  <div id="modalWrap" class="modal-wrap" hidden><div id="modal" role="dialog" aria-modal="true"></div></div>
 
   <script src="/app.js"></script>
 </body>

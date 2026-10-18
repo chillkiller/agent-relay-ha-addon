@@ -1,17 +1,21 @@
-// Agent Relay SPA — no build step, plain ES module in classic script form.
+// Agent Relay SPA — plain JS, kein Build-Schritt.
+// Design: Control-UI-DNA mit Linear-Tokens (docs/DESIGN.md).
 (() => {
   "use strict";
 
-  // ── state ──────────────────────────────────────────────────────────
-  const HUMAN = "human"; // pseudo-agent id for the drag chip "du"
+  const HUMAN = "human"; // Pseudo-ID für den eigenen Chip im Roster
+
   const state = {
     view: "chat",
     rooms: [],
     agents: [],
     projects: [],
-    tasks: [],
     currentRoomId: null,
+    currentInlinePid: null,
+    activeTab: "chat",
     messages: {},
+    lastMetaKey: "", // msg-grouping: key des letzten gerenderten Kopfes
+    adapters: [],
     settings: {},
     ws: null,
   };
@@ -21,14 +25,7 @@
     String(s ?? "").replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  // Base prefix for HA Ingress: the app is served under e.g.
-  // /api/hassio_ingress/<token>/ — API and WS paths must be relative to it.
-  const BASE = location.pathname.endsWith("/")
-    ? location.pathname.slice(0, -1)
-    : location.pathname.replace(/\/[^/]*$/, "");
-  const url = (p) => `${BASE}${p}`;
-
-  // optional API bearer (LAN gate): asked once on 401, kept in sessionStorage
+  // ── API (Bearer aus sessionStorage, 401 → einmalig abfragen) ────────
   function bearer() { return sessionStorage.getItem("relayBearer") || ""; }
 
   async function api(method, path, body) {
@@ -40,8 +37,12 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401) {
-      const tok = prompt("API-Token erforderlich (api_bearer_token):");
-      if (tok) { sessionStorage.setItem("relayBearer", tok); return api(method, path, body); }
+      const tok = prompt("API-Token erforderlich (Add-on-Option api_bearer_token):");
+      if (tok) {
+        sessionStorage.setItem("relayBearer", tok);
+        return api(method, path, body);
+      }
+      throw new Error("nicht autorisiert");
     }
     if (res.status === 204) return null;
     const json = await res.json().catch(() => ({}));
@@ -49,86 +50,83 @@
     return json;
   }
 
-  // streamed token buffers per message id (survive re-renders)
-  const streamBuf = {};
+  // Basis-Prefix für HA-Ingress: UI läuft unter /api/has…/<token>/ — relative
+  // Prefix-Mathe; alles unter dem aktuellen Pfad ohne Dateinamen.
+  const BASE = location.pathname.endsWith("/")
+    ? location.pathname.slice(0, -1)
+    : location.pathname.replace(/\/[^/]*$/, "");
+  const url = (p) => `${BASE}${p}`;
 
-  // ── mobile drawer ─────────────────────────────────────────────────
-  const drawer = () => document.body.classList.contains("sidebar-open");
-  $("#burger").addEventListener("click", () =>
-    document.body.classList.toggle("sidebar-open"));
-
-  // ── websocket ──────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // WebSocket mit exponentiellem Backoff
+  // ═════════════════════════════════════════════════════════════════
+  let wsAttempts = 0;
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-        const tokQ = bearer() ? `?token=${encodeURIComponent(bearer())}` : "";
+    const tokQ = bearer() ? `?token=${encodeURIComponent(bearer())}` : "";
     const ws = new WebSocket(`${proto}://${location.host}${url("/ws")}${tokQ}`);
     state.ws = ws;
-    ws.onopen = () => { attempts = 0; setConn(true); };
-    let attempts = 0;
+    ws.onopen = () => { wsAttempts = 0; setConn(true); };
     ws.onclose = () => {
       setConn(false);
-      const delay = Math.min(15000, 500 * Math.pow(2, attempts++)); // 0.5,1,2,4…15s (review-2)
+      const delay = Math.min(15000, 500 * Math.pow(2, wsAttempts++));
       setTimeout(connectWS, delay);
     };
     ws.onmessage = (ev) => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       handleEvent(msg);
     };
   }
-
   function setConn(on) {
     $("#connDot").classList.toggle("on", on);
-    $("#connText").textContent = on ? "verbunden" : "nicht verbunden";
+    $("#connText").textContent = on ? "verbunden" : "offline — neuer Versuch…";
   }
 
   const typingTimers = {};
   function handleEvent(e) {
     switch (e.type) {
       case "message.created": {
-        if (!state.currentRoomId || e.message.roomId !== state.currentRoomId) break;
+        if (e.message.roomId !== state.currentRoomId) break;
         state.messages[e.message.id] = e.message;
         renderMessages();
         break;
       }
-      case "agent.token": {
-        streamBuf[e.messageId] = (streamBuf[e.messageId] ?? "") + e.delta;
-        const msgEl = document.querySelector(`[data-mid="${e.messageId}"] .content`);
-        if (msgEl) msgEl.textContent = streamBuf[e.messageId];
-        break;
-      }
       case "agent.started": {
-        if (!e.message) break;
-        if (state.currentRoomId === e.message.roomId) {
-          state.messages[e.message.id] = e.message;
-          streamBuf[e.message.id] = "";
-          renderMessages();
-        }
-        break;
-      }
-      case "agent.finished": {
-        if (!e.message) break;
-        delete streamBuf[e.message.id];
-        if (state.messages[e.message.id]) {
-          state.messages[e.message.id] = e.message;
-          renderMessages();
-        }
-        const t = typingTimers[e.message.agentId];
-        if (t) { clearTimeout(t); delete typingTimers[e.message.agentId]; renderTyping(); }
+        if (!e.message || e.message.roomId !== state.currentRoomId) break;
+        state.messages[e.message.id] = e.message;
+        streamBuf[e.message.id] = "";
+        renderMessages();
         break;
       }
       case "typing": {
-        const key = e.agentId;
+        if (e.roomId !== state.currentRoomId) break;
         renderTyping(e.agentName);
-        clearTimeout(typingTimers[key]);
-        typingTimers[key] = setTimeout(() => { delete typingTimers[key]; renderTyping(); }, 12000);
+        clearTimeout(typingTimers[e.agentId]);
+        typingTimers[e.agentId] = setTimeout(() => { delete typingTimers[e.agentId]; renderTyping(); }, 12000);
+        break;
+      }
+      case "agent.token": {
+        streamBuf[e.messageId] = (streamBuf[e.messageId] ?? "") + e.delta;
+        const el = document.querySelector(`[data-mid="${e.messageId}"] .content`);
+        if (el) { el.textContent = streamBuf[e.messageId]; scrollBottom(false); }
+        break;
+      }
+      case "agent.finished": {
+        delete streamBuf[e.message.id ?? ""];
+        if (e.message && state.messages[e.message.id]) {
+          state.messages[e.message.id] = e.message;
+          renderMessages();
+        }
+        if (e.message?.agentId) {
+          clearTimeout(typingTimers[e.message.agentId]);
+          delete typingTimers[e.message.agentId];
+          renderTyping();
+        }
         break;
       }
       case "rooms.changed": loadRooms(); break;
       case "system": {
-        if (e.roomId && e.roomId === state.currentRoomId) {
-          pushLocalSystem(e.text);
-        }
+        if (e.roomId === state.currentRoomId) pushLocalSystem(e.text);
         break;
       }
     }
@@ -136,17 +134,19 @@
 
   function pushLocalSystem(text) {
     const wrap = document.createElement("div");
-    wrap.className = "empty-state";
-    wrap.style.color = "var(--err)";
-    wrap.textContent = text;
-    $("#messages").appendChild(wrap);
+    wrap.className = "msg system";
+    wrap.innerHTML = `<div class="content">${esc(text)}</div>`;
+    const list = $("#messages");
+    list.appendChild(wrap);
+    list.scrollTop = list.scrollHeight;
   }
-
   function renderTyping(name) {
-    $("#typingBar").textContent = name ? `⌨️ ${name} schreibt…` : "";
+    $("#typingBar").textContent = name ? `${name} schreibt…` : "";
   }
 
-  // ── views ──────────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // Views
+  // ═════════════════════════════════════════════════════════════════
   function switchView(view) {
     state.view = view;
     for (const v of ["chat", "agents", "projects", "settings"]) {
@@ -154,11 +154,14 @@
     }
     document.querySelectorAll(".nav-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.view === view));
-    if (view === "projects") loadBoard();
-    if (view === "settings") renderSettings();
+    if (view === "projects") loadProjectsView();
+    if (view === "settings") renderSettingsForm();
+    document.body.classList.remove("sidebar-open");
   }
 
-  // ── rooms ──────────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // Räume (gruppiert: RÄUME / PROJEKTE) + Drag&Drop-Ziele
+  // ═════════════════════════════════════════════════════════════════
   async function loadRooms() {
     state.rooms = await api("GET", "/api/rooms");
     renderRoomList();
@@ -167,100 +170,127 @@
   function renderRoomList() {
     const el = $("#roomList");
     const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat");
-    const projRooms = state.rooms.filter((r) => r.kind === "project");
+    const projs = state.rooms.filter((r) => r.kind === "project");
     const item = (r) => `
-      <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}" data-room="${r.id}" data-kind="${esc(r.kind || "chat")}">
-        <span>${r.kind === "project" ? "🗂" : "#"}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</span>
-        <span class="badge">${r.messageCount || ""}</span>
+      <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
+              data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
+              draggable="false">
+        <span class="room-ico">${r.kind === "project" ? "🗂" : "#"}</span>
+        <span class="marquee" style="flex:1;min-width:0;text-align:left">
+          <span class="marquee__text">${esc(r.name)}</span>
+        </span>
+        <span class="room-actions">
+          <span class="room-action" data-act="rename" data-room="${r.id}" title="Umbenennen">✎</span>
+          <span class="room-action" data-act="del" data-room="${r.id}" title="Löschen">🗑</span>
+        </span>
+        ${r.messageCount ? `<span class="badge">${r.messageCount}</span>` : ""}
       </button>`;
-    const group = (label, rooms) => rooms.length ? `
-      <div class="room-group">${label} <span class="badge">${rooms.length}</span></div>
-      ${rooms.map(item).join("")}` : "";
-    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projRooms);
+    const group = (label, rooms) => rooms.length
+      ? `<div class="room-group">${label}<span class="badge">${rooms.length}</span></div>${rooms.map(item).join("")}`
+      : "";
+    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs);
+
+    el.querySelectorAll("[data-act]").forEach((a) =>
+      a.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const rid = a.dataset.room;
+        const room = state.rooms.find((r) => r.id === rid);
+        if (!room) return;
+        if (a.dataset.act === "rename") renameRoomModal(room);
+        if (a.dataset.act === "del") {
+          if (!confirm(`Raum „${room.name}" inklusive Verlauf löschen?`)) return;
+          await api("DELETE", `/api/rooms/${room.id}`);
+          if (state.currentRoomId === rid) { state.currentRoomId = null; }
+          await loadRooms();
+          if (!state.currentRoomId && state.rooms.length) selectRoom(state.rooms[0].id);
+        }
+      }));
+    // marquee: shift berechnen (name breiter als Zelle → sanfte Scroll-Animation)
+    el.querySelectorAll(".room-item").forEach((row) => {
+      const mq = row.querySelector(".marquee");
+      const txt = row.querySelector(".marquee__text");
+      if (!mq || !txt) return;
+      const overflow = txt.offsetWidth - mq.offsetWidth;
+      if (overflow > 4) {
+        mq.classList.add("marquee--overflowing", "marquee--scrolling");
+        mq.style.setProperty("--marquee-shift", `${-(overflow + 8)}px`);
+      }
+    });
     el.querySelectorAll("[data-room]").forEach((b) => {
       b.addEventListener("click", () => selectRoom(b.dataset.room));
-      // drop target: agent-chip here = join room
       b.addEventListener("dragover", (ev) => { ev.preventDefault(); b.classList.add("dragover"); });
       b.addEventListener("dragleave", () => b.classList.remove("dragover"));
       b.addEventListener("drop", async (ev) => {
         ev.preventDefault(); b.classList.remove("dragover");
         const agentId = ev.dataTransfer.getData("text/agent-id");
         if (!agentId || agentId === HUMAN) return;
-        await api("POST", `/api/rooms/${b.dataset.room}/members`, { agentId });
-        await loadRooms();
-        if (b.dataset.room === state.currentRoomId) await selectRoom(state.currentRoomId);
+        try {
+          if (b.dataset.kind === "project") {
+            // in Projekt-Raum: einladen = Roster-Erweiterung (PATCH agentIds)
+            const room = state.rooms.find((r) => r.id === b.dataset.room);
+            const ids = [...(room?.memberAgentIds || []), agentId];
+            await api("PATCH", `/api/rooms/${b.dataset.room}`, { agentIds: ids });
+          } else {
+            await api("POST", `/api/rooms/${b.dataset.room}/members`, { agentId });
+          }
+          await loadRooms();
+          if (b.dataset.room === state.currentRoomId) await selectRoom(state.currentRoomId);
+        } catch (err) { toast(err.message); }
       });
     });
   }
 
-  let activeTab = "chat"; // per room: "chat" | "board" (project rooms)
-
   async function selectRoom(id) {
     document.body.classList.remove("sidebar-open");
     state.currentRoomId = id;
-    activeTab = "chat";
+    state.activeTab = "chat";
+    state.lastMetaKey = "";
     renderRoomList();
     switchView("chat");
     const room = state.rooms.find((r) => r.id === id);
-    $("#activeRoomName").textContent = room ? `${room.kind === "project" ? "🗂" : "#"} ${room.name}` : "";
+    $("#activeRoomIco").textContent = room?.kind === "project" ? "🗂" : "#";
+    $("#activeRoomName").textContent = room?.name ?? "";
+    renderMemberChips(room);
+    const isProject = room?.kind === "project";
+    $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
+    document.querySelectorAll(".room-tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.tab === "chat"));
+    showTab("chat");
+    await loadMessages();
+    $("#composerInput").focus({ preventScroll: true });
+  }
+
+  function renderMemberChips(room) {
+    const el = $("#memberChips");
     const members = (room?.memberAgentIds || [])
       .map((aid) => state.agents.find((a) => a.id === aid))
       .filter(Boolean);
-    $("#roomMembers").innerHTML = members.map((m) =>
-      `<span class="chip"><span class="emoji">${esc(m.emoji)}</span>${esc(m.name)}</span>`).join("");
-    // tabs only for project rooms
-    const isProject = room?.kind === "project";
-    $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
-    document.querySelector("#view-chat .messages").style.display = "flex";
-    $("#composer").style.display = "flex";
-    document.querySelectorAll(".room-tab").forEach((t) =>
-      t.classList.toggle("active", t.dataset.tab === "chat"));
-    await loadMessages();
-  }
-
-  document.querySelectorAll(".room-tab").forEach((t) =>
-    t.addEventListener("click", async () => {
-      activeTab = t.dataset.tab;
-      document.querySelectorAll(".room-tab").forEach((x) =>
-        x.classList.toggle("active", x === t));
-      showTab();
-    }));
-
-  function showTab() {
-    const msgs = document.querySelector("#view-chat .messages");
-    const composer = $("#composer");
-    const board = $("#inlineBoard");
-    if (activeTab === "board") {
-      msgs.style.display = "none";
-      composer.style.display = "none";
-      if (!board) {
-        const el = document.createElement("div");
-        el.id = "inlineBoard";
-        document.querySelector("#view-chat").insertBefore(el, msgs);
-      }
-      loadInlineBoard();
-    } else {
-      msgs.style.display = "flex";
-      composer.style.display = "flex";
-      if (board) board.remove();
+    if (!members.length) {
+      el.innerHTML = `<span class="hint">Noch keine Agents im Raum — unten im Team ziehen oder ＋ </span>`;
+      return;
     }
+    el.innerHTML = members.map((m) => `
+      <span class="chip" data-aid="${m.id}" title="Klick: entfernen">
+        <span class="swatch" style="background:${esc(m.color)}"></span>
+        ${esc(m.emoji)} ${esc(m.name)}
+      </span>`).join("");
+    el.querySelectorAll("[data-aid]").forEach((c) =>
+      c.addEventListener("click", async () => {
+        if (!confirm(`${c.textContent.trim()} aus dem Raum entfernen?`)) return;
+        await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${c.dataset.aid}`);
+        await loadRooms(); await selectRoom(state.currentRoomId);
+      }));
   }
 
-  let inlineBoardRoomId = null;
-  state.currentInlinePid = null;
-  async function loadInlineBoard(forceRefresh) {
-    const room = state.rooms.find((r) => r.id === state.currentRoomId);
-    if (room?.projectId) state.currentInlinePid = room.projectId;
-    if (!forceRefresh && inlineBoardRoomId === state.currentRoomId) return;
-    inlineBoardRoomId = state.currentRoomId;
-    const b = $("#inlineBoard");
-    if (b && window.__renderBoardInto) await window.__renderBoardInto(b, state.currentInlinePid);
-  }
+  // ═════════════════════════════════════════════════════════════════
+  // Nachrichten (Slack-Dichte: Meta nur bei Gruppenstart)
+  // ═════════════════════════════════════════════════════════════════
+  const streamBuf = {};
 
   async function loadMessages() {
     if (!state.currentRoomId) return;
     state.messages = {};
-    Object.keys(streamBuf).forEach((k) => delete streamBuf[k]); // review M-3
+    Object.keys(streamBuf).forEach((k) => delete streamBuf[k]);
     const list = await api("GET", `/api/rooms/${state.currentRoomId}/messages`);
     for (const m of list) state.messages[m.id] = m;
     renderMessages(true);
@@ -270,72 +300,203 @@
     const wrap = $("#messages");
     const msgs = Object.values(state.messages)
       .filter((m) => m.roomId === state.currentRoomId)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    stickBottom(wrap, force, () => {
-      wrap.innerHTML = msgs.length ? msgs.map(msgHtml).join("") :
-        `<div class="empty-state"><p>Noch keine Nachrichten in diesem Raum.</p></div>`;
-      wrap.querySelectorAll("[data-mid]").forEach(annotateMsg);
-    });
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const near = force || (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight) < 140;
+    if (!msgs.length) {
+      wrap.innerHTML = emptyStateHtml();
+      return;
+    }
+    wrap.innerHTML = msgs.map((m, i) => msgHtml(m, msgs[i - 1])).join("");
+    if (near) scrollBottom(true);
   }
 
-  function stickBottom(wrap, force, fill) {
-    const near = force || (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight) < 120;
-    fill();
-    if (near) wrap.scrollTop = wrap.scrollHeight;
+  function scrollBottom(force) {
+    const wrap = $("#messages");
+    wrap.scrollTop = force ? wrap.scrollHeight : wrap.scrollHeight;
   }
 
-  function agentOf(m) {
-    return state.agents.find((a) => a.id === m.agentId);
+  function emptyStateHtml() {
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    if (!room) return `<div class="empty-state"><div class="big">⌁</div>Erstelle einen Raum — <kbd>＋ Raum</kbd> links unten.</div>`;
+    if (room.kind === "project") {
+      return `<div class="empty-state"><div class="big">🗂</div>Projekt-Raum bereit.<div class="hint">Chat hier abhalten oder zum <strong>Board</strong>-Tab wechseln. Agents per Drag & Drop ins Roster.</div></div>`;
+    }
+    return `<div class="empty-state"><div class="big">#</div>Noch ruhig hier.<div class="hint">Schreib die erste Nachricht — <kbd>@Name</kbd> ruft gezielt einen Agent auf.</div></div>`;
   }
 
-  function msgHtml(m) {
+  function msgHtml(m, prev) {
+    if (m.senderKind === "system") {
+      return `<div class="msg system" data-mid="${m.id}"><div class="content">${esc(m.content)}</div></div>`;
+    }
+    const agent = m.agentId ? state.agents.find((a) => a.id === m.agentId) : null;
     const who = m.senderKind === "human" ? "du" : m.senderName;
-    const dot = m.agentId && agentOf(m)
-      ? `<span class="dot" style="background:${agentOf(m).color}"></span>` : "";
+    const groupFirst = !prev || prev.senderKind !== m.senderKind || prev.senderName !== m.senderName;
+    const time = fmtTime(m.createdAt);
+    const streaming = m.status === "streaming" && streamBuf[m.id] !== undefined;
+    const cls = ["msg", m.senderKind, m.status === "error" ? "error" : "", streaming ? "streaming" : "", groupFirst ? "group-first" : ""].filter(Boolean).join(" ");
+    const swatch = agent ? `<span class="swatch" style="background:${esc(agent.color)}"></span>` : "";
     return `
-      <div class="msg ${m.senderKind} ${m.status} ${m.status === "error" ? "error" : ""}" data-mid="${m.id}">
-        <div class="meta">${dot}<strong>${esc(who)}</strong><span>${esc(fmtTime(m.createdAt))}</span></div>
-        <div class="content">${esc(m.status === "streaming" && streamBuf[m.id] !== undefined ? streamBuf[m.id] : m.content)}</div>
+      <div class="${cls}" data-mid="${m.id}">
+        <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
+        <div class="content">${esc(streaming ? streamBuf[m.id] : m.content)}</div>
       </div>`;
   }
 
-  function annotateMsg(el) {
-    const m = state.messages[el.dataset.mid];
-    if (m) el.classList.toggle("streaming", m.status === "streaming");
-  }
-
   function fmtTime(iso) {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    try {
+      return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    } catch { return ""; }
   }
 
-  // ── agents ─────────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // Composer + Mention-Popover
+  // ═════════════════════════════════════════════════════════════════
+  const input = $("#composerInput");
+  const sendBtn = $("#composerSend");
+
+  input.addEventListener("input", () => {
+    sendBtn.disabled = !input.value.trim();
+    autoGrow();
+    mentionCheck();
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (mentionKey(ev)) return;
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      $("#composer").requestSubmit();
+    }
+  });
+  function autoGrow() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
+
+  $("#composer").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const content = input.value.trim();
+    if (!content || !state.currentRoomId) return;
+    input.value = ""; autoGrow(); sendBtn.disabled = true; hideMention();
+    try {
+      await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
+    } catch (err) {
+      pushLocalSystem(err.message);
+      input.value = content; autoGrow(); sendBtn.disabled = false;
+    }
+  });
+
+  // Mention: "@frag" im Text → Vorschlagsliste
+  let mentionSel = 0, mentionChoices = [];
+  function mentionCheck() {
+    const upTo = input.value.slice(0, input.selectionStart ?? 0);
+    const m = upTo.match(/@([\w-]*)$/);
+    if (!m) return hideMention();
+    const q = m[1].toLowerCase();
+    mentionChoices = state.agents.filter((a) => a.enabled)
+      .filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+      .slice(0, 6);
+    if (!mentionChoices.length) return hideMention();
+    mentionSel = 0;
+    const pop = $("#mentionPop");
+    pop.innerHTML = mentionChoices.map((a, i) => `
+      <button type="button" class="${i === mentionSel ? "sel" : ""}" data-mid="${a.id}">
+        <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} <strong>${esc(a.name)}</strong>
+      </button>`).join("");
+    pop.hidden = false;
+    pop.querySelectorAll("[data-mid]").forEach((b) =>
+      b.addEventListener("click", () => applyMention(b.dataset.mid)));
+  }
+  function mentionKey(ev) {
+    if ($("#mentionPop").hidden) return false;
+    const pop = $("#mentionPop");
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      mentionSel = (mentionSel + (ev.key === "ArrowDown" ? 1 : mentionChoices.length - 1)) % mentionChoices.length;
+      pop.querySelectorAll("button").forEach((b, i) => b.classList.toggle("sel", i === mentionSel));
+      return true;
+    }
+    if (ev.key === "Enter" || ev.key === "Tab") {
+      ev.preventDefault(); applyMention(mentionChoices[mentionSel].id); return true;
+    }
+    if (ev.key === "Escape") { hideMention(); return true; }
+    return false;
+  }
+  function applyMention(agentId) {
+    const a = state.agents.find((x) => x.id === agentId);
+    if (!a) return;
+    const start = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, start).replace(/@[\w-]*$/, `@${a.name} `);
+    input.value = before + input.value.slice(start);
+    hideMention(); autoGrow(); input.focus();
+  }
+  function hideMention() { $("#mentionPop").hidden = true; }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Roster (Team) — Drag-Quellen / Rückgabe-Ziele
+  // ═════════════════════════════════════════════════════════════════
+  function renderRoster() {
+    const list = $("#rosterList");
+    if (!list) return;
+    list.innerHTML = [
+      `<span class="roster-chip" data-agent="${HUMAN}" draggable="false"><span class="swatch" style="background:var(--ok)"></span>du</span>`,
+      ...state.agents.map((a) => `
+        <span class="roster-chip" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen">
+          <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} ${esc(a.name)}
+        </span>`),
+    ].join("");
+    list.querySelectorAll('[draggable="true"]').forEach((chip) => {
+      chip.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/agent-id", chip.dataset.agent);
+        ev.dataTransfer.effectAllowed = "copyMove";
+      });
+      chip.addEventListener("dragover", (ev) => { ev.preventDefault(); chip.classList.add("dragover"); });
+      chip.addEventListener("dragleave", () => chip.classList.remove("dragover"));
+      chip.addEventListener("drop", async (ev) => {
+        ev.preventDefault(); chip.classList.remove("dragover");
+        const agentId = ev.dataTransfer.getData("text/agent-id");
+        if (!agentId || agentId === HUMAN || agentId === chip.dataset.agent || !state.currentRoomId) return;
+        try {
+          await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${agentId}`);
+          await loadRooms(); await selectRoom(state.currentRoomId);
+        } catch (err) { toast(err.message); }
+      });
+    });
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Agents-View
+  // ═════════════════════════════════════════════════════════════════
   async function loadAgents() {
     state.agents = await api("GET", "/api/agents");
     if (state.view === "agents") renderAgents();
     renderRoster();
+    if (state.currentRoomId) renderMemberChips(state.rooms.find((r) => r.id === state.currentRoomId));
   }
 
   function renderAgents() {
-    $("#agentCards").innerHTML = state.agents.map((a) => `
+    const el = $("#agentCards");
+    if (!state.agents.length) {
+      el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="big">🤖</div>Noch keine Agents.<div class="hint">Lege den ersten an — Adapter <code>echo</code> funktioniert sofort.</div></div>`;
+      return;
+    }
+    el.innerHTML = state.agents.map((a) => `
       <div class="card">
         <div class="row">
           <span class="emoji">${esc(a.emoji)}</span>
           <div><div class="name">${esc(a.name)}</div>
-          <div class="sub">${esc(a.adapter)}${a.model ? " · " + esc(a.model) : ""}</div></div>
-          <span class="chip" style="margin-left:auto;border-color:${esc(a.color)}">${a.enabled ? "aktiv" : "aus"}</span>
+            <div class="sub">${esc(a.adapter)}${a.model ? " · " + esc(a.model) : ""}</div></div>
+          <span class="status-dot" style="background:${a.enabled ? "var(--ok)" : "var(--ink-4)"}" title="${a.enabled ? "aktiv" : "aus"}"></span>
         </div>
-        <div class="sub">${esc((a.systemPrompt || "").slice(0, 110))}${(a.systemPrompt || "").length > 110 ? "…" : ""}</div>
+        ${a.systemPrompt ? `<div class="desc">${esc(a.systemPrompt.slice(0, 130))}${a.systemPrompt.length > 130 ? "…" : ""}</div>` : ""}
         <div class="actions">
           <button class="btn" data-edit="${a.id}">Bearbeiten</button>
           <button class="btn danger" data-del="${a.id}">Löschen</button>
         </div>
       </div>`).join("");
-    $("#agentCards").querySelectorAll("[data-edit]").forEach((b) =>
-      b.addEventListener("click", () => agentModal(b.dataset.edit)));
-    $("#agentCards").querySelectorAll("[data-del]").forEach((b) =>
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => agentModal(b.dataset.edit)));
+    el.querySelectorAll("[data-del]").forEach((b) =>
       b.addEventListener("click", async () => {
-        if (!confirm("Agent wirklich löschen?")) return;
+        const a = state.agents.find((x) => x.id === b.dataset.del);
+        if (!confirm(`Agent „${a?.name}" löschen? (Räume verlieren ihn)`)) return;
         await api("DELETE", `/api/agents/${b.dataset.del}`);
         await loadAgents(); await loadRooms();
       }));
@@ -346,22 +507,19 @@
     openModal(a ? "Agent bearbeiten" : "Neuer Agent", [
       { label: "Name", name: "name", type: "text", value: a?.name, required: true },
       { label: "Emoji", name: "emoji", type: "text", value: a?.emoji ?? "🤖" },
-      { label: "Farbe", name: "color", type: "color", value: a?.color ?? "#6ea8fe" },
+      { label: "Farbe (Chat-Zuordnung)", name: "color", type: "color", value: a?.color ?? "#5e6ad2" },
       { label: "Adapter", name: "adapter", type: "select", value: a?.adapter ?? "echo",
-        options: state.adapters.map((x) => ({ value: x, label: x })) },
-      { label: "Modell (z. B. openclaw/coordinator)", name: "model", type: "text", value: a?.model ?? "" },
+        options: state.adapters.map((x) => ({ value: x, label: x === "echo" ? "echo (Demo)" : x === "openai" ? "openai — OpenAI-kompatibel (OpenClaw /v1, Ollama, …)" : x === "openclaw" ? "openclaw — nativ (Gateway-WS)" : x })) },
+      { label: "Modell / Agent-Ziel  ·  z. B. openclaw/coordinator", name: "model", type: "text", value: a?.model ?? "" },
       { label: "Basis-URL (leer = globale Einstellung)", name: "baseUrl", type: "text", value: a?.baseUrl ?? "" },
-      { label: "API-Key (leer = globales Token)", name: "apiKey", type: "password", value: a?.apiKey ?? "" },
+      { label: "API-Key (write-only — leer = unverändert)", name: "apiKey", type: "password", value: "" },
       { label: "System-Prompt", name: "systemPrompt", type: "textarea", value: a?.systemPrompt ?? "" },
       { label: "Aktiv", name: "enabled", type: "checkbox", checked: a ? !!a.enabled : true },
     ], async (form) => {
       const data = Object.fromEntries(new FormData(form).entries());
       data.enabled = form.enabled.checked;
-      // write-only apiKey: only send when the user typed something — an empty
-      // field must NOT clear the stored key (key never renders back).
-      if (!data.apiKey) {
-        const { apiKey, ...rest } = data;
-        data = rest;
+      if (form.apiKey && !form.apiKey.value) {
+        const { apiKey, ...rest } = data; data = rest; // write-only: nie leeren
       }
       if (id) await api("PATCH", `/api/agents/${id}`, data);
       else await api("POST", "/api/agents", data);
@@ -370,94 +528,91 @@
     });
   }
 
-  // ── projects + tasks ───────────────────────────────────────────────
-  async function loadBoard() {
-    state.projects = await api("GET", "/api/projects");
-    state.tasks = await api("GET", "/api/tasks");
-    renderBoard();
-  }
-
+  // ═════════════════════════════════════════════════════════════════
+  // Projekte (Launcher) + Board-Tab im Raum
+  // ═════════════════════════════════════════════════════════════════
   const COLUMNS = [["todo", "Zu tun"], ["doing", "In Arbeit"], ["done", "Fertig"]];
 
-  // Ein Renderer für beide Flächen: Projekte-View (#projectBoard) und Board-Tab im Raum (#inlineBoard)
-  function boardHtml(forRoom, pid) {
-    const projects = pid ? state.projects.filter((p) => p.id === pid) : state.projects;
-    if (!projects.length) return `<div class="empty-state"><p>Noch keine Projekte.</p></div>`;
-    return projects.map((p) => {
-      const tasks = state.tasks.filter((t) => t.projectId === p.id);
-      return `
-      <div class="project">
-        <div class="p-head">
-          <span class="p-dot" style="background:${esc(p.color)}"></span>
-          <h3>${esc(p.name)}</h3>
-          ${forRoom ? "" : `<button class="btn danger" data-pdel="${p.id}" style="margin-left:auto">Löschen</button>`}
-        </div>
-        <div class="p-desc">${esc(p.description)}</div>
-        <div class="columns">
-          ${COLUMNS.map(([key, label]) => `
-            <div class="column">
-              <h4>${label}</h4>
-              ${tasks.filter((t) => t.status === key).map((t) => `
-                <div class="task ${t.status === "done" ? "done" : ""}">
-                  <span>${esc(t.title)}</span>
-                  <span class="who">${t.assignee ? `@${esc(assigneeName(t.assignee))}` : ""}</span>
-                  <span class="t-actions">
-                    ${t.status !== "todo" ? `<button data-tmove="${t.id}:${prevStatus(t.status)}" title="zurück">←</button>` : ""}
-                    ${t.status !== "done" ? `<button data-tmove="${t.id}:${nextStatus(t.status)}" title="weiter">→</button>` : ""}
-                    <button data-tdel="${t.id}">✕</button>
-                  </span>
-                </div>`).join("")}
-            </div>`).join("")}
-        </div>
-        <button class="add-task" data-taskadd="${p.id}">＋ Aufgabe</button>
-      </div>`;
-    }).join("");
-  }
-
-  function bindBoardHandlers(el) {
-    el.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm("Projekt löschen (zugeordnete Aufgaben auch, Räume bleiben)")) return;
-      await api("DELETE", `/api/projects/${b.dataset.pdel}`);
-      loadBoard();
-    }));
-    el.querySelectorAll("[data-taskadd]").forEach((b) => b.addEventListener("click", () => taskModal(b.dataset.taskadd)));
-    el.querySelectorAll("[data-tmove]").forEach((b) => b.addEventListener("click", async () => {
-      const [id, st] = b.dataset.tmove.split(":");
-      await api("PATCH", `/api/tasks/${id}`, { status: st });
-      loadBoard(); loadInlineBoard(true);
-    }));
-    el.querySelectorAll("[data-tdel]").forEach((b) => b.addEventListener("click", async () => {
-      await api("DELETE", `/api/tasks/${b.dataset.tdel}`);
-      loadBoard(); loadInlineBoard(true);
-    }));
-  }
-
-  window.__renderBoardInto = async function (el, pid) {
+  async function loadProjectsView() {
     state.projects = await api("GET", "/api/projects");
-    state.tasks = await api("GET", "/api/tasks", null).catch(() => api("GET", "/api/tasks"));
-    el.innerHTML = boardHtml(true, pid);
-    bindBoardHandlers(el);
-  };
-
-  async function loadInlineBoardRefresh() {
-    return loadInlineBoard(true);
-  }
-  function renderBoard() {
-    const el = $("#projectBoard");
+    state.tasks = await api("GET", "/api/tasks");
+    const el = $("#projectList");
     if (!state.projects.length) {
-      el.innerHTML = `<div class="empty-state"><p>Noch keine Projekte.</p></div>`;
+      el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="big">🗂</div>Noch keine Projekte.<div class="hint">Ein Projekt-Raum ist Chat + Board in einem.</div></div>`;
       return;
     }
     el.innerHTML = state.projects.map((p) => {
+      const room = state.rooms.find((r) => r.projectId === p.id);
+      const tasks = state.tasks.filter((t) => t.projectId === p.id);
+      const doing = tasks.filter((t) => t.status === "doing").length;
+      const done = tasks.filter((t) => t.status === "done").length;
+      const members = (room?.memberAgentIds || []).map((aid) => state.agents.find((a) => a.id === aid)).filter(Boolean);
+      return `
+      <button class="proj-tile" data-open="${room?.id ?? ""}">
+        <span class="tile-head"><span class="p-dot" style="background:${esc(p.color)};width:10px;height:10px;border-radius:50%"></span>
+          <span class="tile-name">${esc(p.name)}</span>
+          <span class="tile-meta" style="margin-left:auto">${doing ? `${doing} aktiv · ` : ""}${done} fertig</span></span>
+        <span class="tile-meta">${esc(p.description || "—")}</span>
+        <span class="tiles-members">${members.map((m) => `<span class="swatch" style="background:${esc(m.color)};width:10px;height:10px;border-radius:50%;display:inline-block"></span>`).join("")}</span>
+      </button>`;
+    }).join("");
+    el.querySelectorAll("[data-open]").forEach((b) =>
+      b.addEventListener("click", () => { if (b.dataset.open) selectRoom(b.dataset.open); }));
+  }
+
+  function newProjectModal() {
+    openModal("Neuer Projekt-Raum", [
+      { label: "Name", name: "name", type: "text", required: true },
+      { label: "Beschreibung", name: "description", type: "textarea" },
+      { label: "Farbe", name: "color", type: "color", value: "#5e6ad2" },
+      { label: "Agents im Raum (Mehrfachauswahl)", name: "agentIds", type: "select", options: [] },
+    ], async (form) => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.kind = "project";
+      data.agentIds = [...form.agentIds.selectedOptions].map((o) => o.value);
+      const room = await api("POST", "/api/rooms", data); // autolink erzeugt das Projekt
+      await loadRooms(); await loadAgents();
+      selectRoom(room.id);
+      return true;
+    });
+    const agentSel = $("#modal [name=agentIds]");
+    agentSel.setAttribute("multiple", "multiple");
+    agentSel.size = Math.min(6, Math.max(3, state.agents.length));
+    agentSel.innerHTML = state.agents.map((a) =>
+      `<option value="${a.id}">${esc(a.emoji)} ${esc(a.name)}</option>`).join("");
+  }
+
+  // Board-Tab im Raum
+  function showTab(tab) {
+    state.activeTab = tab;
+    const msgs = $("#messages"), board = $("#inlineBoard"), composer = $("#composer");
+    if (tab === "board") {
+      msgs.hidden = true; composer.style.display = "none"; board.hidden = false;
+      renderInlineBoard();
+    } else {
+      board.hidden = true; msgs.hidden = false; composer.style.display = "flex";
+    }
+  }
+
+  async function renderInlineBoard() {
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    state.currentInlinePid = room?.projectId ?? null;
+    state.projects = await api("GET", "/api/projects");
+    state.tasks = await api("GET", `/api/tasks${state.currentInlinePid ? `?projectId=${state.currentInlinePid}` : ""}`);
+    const el = $("#inlineBoard");
+    const projects = state.projects.filter((p) => !state.currentInlinePid || p.id === state.currentInlinePid);
+    if (!projects.length) {
+      el.innerHTML = `<div class="empty-state"><div class="big">🗂</div>Kein Projekt verknüpft.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="board-wrap">${projects.map((p) => {
       const tasks = state.tasks.filter((t) => t.projectId === p.id);
       return `
       <div class="project">
         <div class="p-head">
-          <span class="p-dot" style="background:${esc(p.color)}"></span>
+          <span class="p-dot" style="background:${esc(p.color)};width:10px;height:10px;border-radius:50%"></span>
           <h3>${esc(p.name)}</h3>
-          <button class="btn danger" data-pdel="${p.id}" style="margin-left:auto">Löschen</button>
         </div>
-        <div class="p-desc">${esc(p.description)}</div>
         <div class="columns">
           ${COLUMNS.map(([key, label]) => `
             <div class="column">
@@ -469,36 +624,28 @@
                   <span class="t-actions">
                     ${t.status !== "todo" ? `<button data-tmove="${t.id}:${prevStatus(t.status)}" title="zurück">←</button>` : ""}
                     ${t.status !== "done" ? `<button data-tmove="${t.id}:${nextStatus(t.status)}" title="weiter">→</button>` : ""}
-                    <button data-tdel="${t.id}">✕</button>
+                    <button data-tdel="${t.id}" title="löschen">✕</button>
                   </span>
-                </div>`).join("")}
+                </div>`).join("") || `<div class="hint" style="padding:4px 2px">—</div>`}
             </div>`).join("")}
         </div>
         <button class="add-task" data-taskadd="${p.id}">＋ Aufgabe</button>
       </div>`;
-    }).join("");
-
-    el.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm("Projekt löschen (zugeordnete Aufgaben auch, Räume bleiben)")) return;
-      await api("DELETE", `/api/projects/${b.dataset.pdel}`);
-      loadBoard();
-    }));
+    }).join("")}</div>`;
     el.querySelectorAll("[data-taskadd]").forEach((b) => b.addEventListener("click", () => taskModal(b.dataset.taskadd)));
     el.querySelectorAll("[data-tmove]").forEach((b) => b.addEventListener("click", async () => {
       const [id, st] = b.dataset.tmove.split(":");
       await api("PATCH", `/api/tasks/${id}`, { status: st });
-      loadBoard();
+      renderInlineBoard();
     }));
     el.querySelectorAll("[data-tdel]").forEach((b) => b.addEventListener("click", async () => {
       await api("DELETE", `/api/tasks/${b.dataset.tdel}`);
-      loadBoard();
+      renderInlineBoard();
     }));
   }
 
   function assigneeName(assignee) {
-    const a = typeof assignee === "number"
-      ? state.agents[assignee - 1]
-      : state.agents.find((x) => x.id === assignee);
+    const a = state.agents.find((x) => x.id === assignee || x.name === assignee);
     return a ? a.name : String(assignee);
   }
   function nextStatus(s) { return s === "todo" ? "doing" : "done"; }
@@ -510,191 +657,210 @@
       { label: "Notizen", name: "notes", type: "textarea" },
       { label: "Status", name: "status", type: "select", value: "todo",
         options: COLUMNS.map(([v, l]) => ({ value: v, label: l })) },
-      { label: "Agent (Nr. oder leer)", name: "assignee", type: "text" },
+      { label: "Agent (Name)", name: "assignee", type: "text" },
     ], async (form) => {
       const data = Object.fromEntries(new FormData(form).entries());
       data.projectId = projectId;
       await api("POST", "/api/tasks", data);
-      loadBoard();
+      renderInlineBoard();
       return true;
     });
   }
 
-  function projectModal(id) {
-    const p = id ? state.projects.find((x) => x.id === id) : null;
-    openModal(p ? "Projekt bearbeiten" : "Neues Projekt", [
-      { label: "Name", name: "name", type: "text", value: p?.name, required: true },
-      { label: "Beschreibung", name: "description", type: "textarea", value: p?.description ?? "" },
-      { label: "Farbe", name: "color", type: "color", value: p?.color ?? "#8a7ff0" },
-    ], async (form) => {
-      const data = Object.fromEntries(new FormData(form).entries());
-      if (id) await api("PATCH", `/api/projects/${id}`, data);
-      else await api("POST", "/api/projects", data);
-      loadBoard();
-      return true;
-    });
-  }
+  function projectModalEdit() { /* Project-Tile klick → Raum (Implementierung oben) */ }
 
-  // ── settings ───────────────────────────────────────────────────────
-  async function renderSettings() {
+  // ═════════════════════════════════════════════════════════════════
+  // Einstellungen
+  // ═════════════════════════════════════════════════════════════════
+  async function renderSettingsForm() {
     state.settings = await api("GET", "/api/settings");
     const f = $("#settingsForm");
     f.relayName.value = state.settings.relayName ?? "";
     f.openclawBaseUrl.value = state.settings.openclawBaseUrl ?? "";
-    f.openclawToken.value = state.settings.openclawToken ?? "";
+    f.openclawToken.value = ""; // write-only: nie den Wert zurückspielen
     $("#brandName").textContent = state.settings.relayName || "Agent Relay";
   }
 
   $("#settingsForm").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = ev.target;
-    const saved = await api("PATCH", "/api/settings", {
-      relayName: f.relayName.value,
-      openclawBaseUrl: f.openclawBaseUrl.value,
-      openclawToken: f.openclawToken.value,
-    });
+    const patch = { relayName: f.relayName.value, openclawBaseUrl: f.openclawBaseUrl.value };
+    if (f.openclawToken.value) patch.openclawToken = f.openclawToken.value; // nur bei Eingabe
+    const saved = await api("PATCH", "/api/settings", patch);
     state.settings = saved;
     $("#brandName").textContent = saved.relayName || "Agent Relay";
     $("#settingsSaved").textContent = "✓ gespeichert";
-    setTimeout(() => { $("#settingsSaved").textContent = ""; }, 2500);
+    setTimeout(() => { $("#settingsSaved").textContent = ""; }, 2400);
   });
 
-  // ── modal helper ───────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // Modal + Popover + Toast
+  // ═════════════════════════════════════════════════════════════════
   function openModal(title, fields, onSubmit) {
-    const dlg = $("#modal");
+    const wrap = $("#modalWrap"), dlg = $("#modal");
+    wrap.hidden = false;
     dlg.innerHTML = `
       <h3>${esc(title)}</h3>
-      <form method="dialog" novalidate>
-        ${fields.map((f) => {
-          if (f.type === "select") {
-            return `<label>${esc(f.label)}<select name="${f.name}">
-              ${f.options.map((o) => `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}
-            </select></label>`;
-          }
-          if (f.type === "checkbox") {
-            return `<label class="checkrow"><input type="checkbox" name="${f.name}" ${f.checked ? "checked" : ""}/> ${esc(f.label)}</label>`;
-          }
-          if (f.type === "textarea") {
-            return `<label>${esc(f.label)}<textarea name="${f.name}">${esc(f.value ?? "")}</textarea></label>`;
-          }
-          return `<label>${esc(f.label)}<input type="${f.type}" name="${f.name}" value="${esc(f.value ?? "")}" /></label>`;
-        }).join("")}
+      <form novalidate>
+        ${fields.map((f) => f.type === "select"
+          ? `<label>${esc(f.label)}<select name="${f.name}">${f.options.map((o) =>
+              `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`
+          : f.type === "checkbox"
+          ? `<label class="checkrow"><input type="checkbox" name="${f.name}" ${f.checked ? "checked" : ""}/>${esc(f.label)}</label>`
+          : f.type === "textarea"
+          ? `<label>${esc(f.label)}<textarea name="${f.name}">${esc(f.value ?? "")}</textarea></label>`
+          : `<label>${esc(f.label)}<input type="${f.type}" name="${f.name}" value="${esc(f.value ?? "")}" ${f.required ? "required" : ""}/></label>`).join("")}
         <div class="modal-actions">
-          <button type="button" class="btn" value="cancel">Abbrechen</button>
-          <button type="submit" class="btn accent" value="ok">OK</button>
+          <button type="button" class="btn" data-cancel>Abbrechen</button>
+          <button type="submit" class="btn primary">OK</button>
         </div>
       </form>`;
+    dlg.querySelector("[data-cancel]").addEventListener("click", () => closeModal());
     const form = dlg.querySelector("form");
-    const cancel = form.querySelector("[value=cancel]");
-    cancel.addEventListener("click", () => dlg.close());
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
+      if (!form.reportValidity()) return;
       Promise.resolve(onSubmit(form))
-        .then((ok) => { if (ok !== false) dlg.close(); })
-        .catch((err) => alert(err.message));
+        .then((ok) => { if (ok !== false) closeModal(); })
+        .catch((err) => toast(err.message));
     });
-    dlg.showModal();
+    dlg.querySelector("input,select,textarea")?.focus();
+  }
+  function closeModal() { $("#modalWrap").hidden = true; $("#modal").innerHTML = ""; }
+  $("#modalWrap").addEventListener("mousedown", (ev) => {
+    if (ev.target === $("#modalWrap")) closeModal();
+  });
+
+  let popEl = null;
+  function openPopover(anchor, title, items) {
+    closePopover();
+    popEl = document.createElement("div");
+    popEl.className = "pop";
+    popEl.innerHTML = `${title ? `<div class="pop-head">${esc(title)}</div>` : ""}${items.map((it, i) =>
+      `<button data-pi="${i}" class="${it.danger ? "danger" : ""}">${it.label}</button>`).join("")}`;
+    document.body.appendChild(popEl);
+    const r = anchor.getBoundingClientRect();
+    const pw = popEl.offsetWidth, ph = popEl.offsetHeight;
+    let x = Math.min(r.right - pw, window.innerWidth - pw - 8);
+    let y = r.bottom + 6;
+    if (y + ph > window.innerHeight - 8) y = r.top - ph - 6;
+    popEl.style.left = Math.max(8, x) + "px";
+    popEl.style.top = Math.max(8, y) + "px";
+    popEl.querySelectorAll("[data-pi]").forEach((b) =>
+      b.addEventListener("click", () => { closePopover(); items[Number(b.dataset.pi)].run(); }));
+    setTimeout(() => document.addEventListener("mousedown", popDismiss), 0);
+  }
+  function popDismiss(ev) {
+    if (popEl && !popEl.contains(ev.target)) closePopover();
+  }
+  function closePopover() {
+    if (popEl) { popEl.remove(); popEl = null; document.removeEventListener("mousedown", popDismiss); }
   }
 
-  // ── modals wiring ──────────────────────────────────────────────────
+  function toast(msg) {
+    const t = document.createElement("div");
+    t.className = "toastbox";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.classList.add("out"), 2600);
+    setTimeout(() => t.remove(), 3000);
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Menü-Handler (Member-Add, Raummenü, Mobile-Drawer)
+  // ═════════════════════════════════════════════════════════════════
+  $("#memberAdd").addEventListener("click", () => {
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    if (!room) return toast("Erst einen Raum wählen");
+    const outside = state.agents.filter((a) => !(room.memberAgentIds || []).includes(a.id));
+    if (!outside.length) return toast("Alle Agents sind schon im Raum");
+    openPopover($("#memberAdd"), "Agent einladen", outside.map((a) => ({
+      label: `${a.emoji} ${a.name}`,
+      run: async () => {
+        await api("POST", `/api/rooms/${room.id}/members`, { agentId: a.id });
+        await loadRooms(); await selectRoom(room.id);
+      },
+    })));
+  });
+
+  $("#roomMenu").addEventListener("click", () => {
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    if (!room) return toast("Erst einen Raum wählen");
+    openPopover($("#roomMenu"), room.name, [
+      { label: "✏️ Umbenennen", run: () => renameRoomModal(room) },
+      { label: room.kind === "project" ? "💬 In Chat-Raum umwandeln" : "🗂 In Projekt-Raum umwandeln",
+        run: async () => {
+          await api("PATCH", `/api/rooms/${room.id}`, { kind: room.kind === "project" ? "chat" : "project" });
+          await loadRooms(); await selectRoom(room.id);
+        } },
+      { label: "🗑 Raum löschen", danger: true, run: async () => {
+        if (!confirm(`Raum „${room.name}" inklusive Verlauf löschen?`)) return;
+        await api("DELETE", `/api/rooms/${room.id}`);
+        state.currentRoomId = null;
+        await loadRooms();
+        if (state.rooms.length) selectRoom(state.rooms[0].id);
+        else $("#activeRoomName").textContent = "Kein Raum gewählt";
+      } },
+    ]);
+  });
+
+  function renameRoomModal(room) {
+    openModal("Raum umbenennen", [
+      { label: "Name", name: "name", type: "text", value: room.name, required: true },
+    ], async (form) => {
+      await api("PATCH", `/api/rooms/${room.id}`, { name: form.name.value });
+      await loadRooms(); await selectRoom(room.id);
+      return true;
+    });
+  }
+
+  $("#burger").addEventListener("click", () =>
+    document.body.classList.toggle("sidebar-open"));
+
   $("#newRoomBtn").addEventListener("click", () => {
     openModal("Neuer Raum", [
       { label: "Raumname", name: "name", type: "text", required: true },
       { label: "Typ", name: "kind", type: "select", value: "chat", options: [
         { value: "chat", label: "💬 Chat-Raum" },
-        { value: "project", label: "🗂 Projekt-Raum (mit Task-Board)" },
+        { value: "project", label: "🗂 Projekt-Raum (Chat + Board)" },
       ]},
-      { label: "Agents im Raum (Mehrfachauswahl, oder später reinziehen)", name: "agentIds", type: "select", options: [] },
-      { label: "Projekt (nur für chat-Kind, optional)", name: "projectId", type: "select", options: [] },
+      { label: "Agents im Raum (später auch per Drag&Drop)", name: "agentIds", type: "select", options: [] },
     ], async (form) => {
       const data = { name: form.name.value, kind: form.kind.value };
       data.agentIds = [...form.agentIds.selectedOptions].map((o) => o.value);
-      data.projectId = form.projectId.value || null;
       const room = await api("POST", "/api/rooms", data);
-      await loadRooms();
-      await loadBoard().catch(() => {});
+      await loadRooms(); await loadAgents();
       selectRoom(room.id);
       return true;
     });
-    const agentSel = $("#modal [name=agentIds]");
-    agentSel.setAttribute("multiple", "multiple");
-    agentSel.size = Math.max(3, state.agents.length);
-    agentSel.innerHTML = state.agents.map((a) =>
-      `<option value="${a.id}">${esc(a.emoji)} ${esc(a.name)} (${esc(a.adapter)})</option>`).join("");
-    const projSel = $("#modal [name=projectId]");
-    projSel.innerHTML = `<option value="">— kein Projekt —</option>` +
-      state.projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+    const sel = $("#modal [name=agentIds]");
+    sel.setAttribute("multiple", "multiple");
+    sel.size = Math.min(6, Math.max(3, state.agents.length));
+    sel.innerHTML = state.agents.map((a) =>
+      `<option value="${a.id}">${esc(a.emoji)} ${esc(a.name)}</option>`).join("");
   });
 
   $("#newAgentBtn").addEventListener("click", () => agentModal());
-  $("#newProjectBtn").addEventListener("click", () => projectModal());
+  $("#newAgentQuick").addEventListener("click", () => agentModal());
+  $("#newProjectBtn").addEventListener("click", () => newProjectModal());
 
   document.querySelectorAll(".nav-btn").forEach((b) =>
     b.addEventListener("click", () => switchView(b.dataset.view)));
+  document.querySelectorAll(".room-tab").forEach((t) =>
+    t.addEventListener("click", () => showTab(t.dataset.tab)));
 
-  // ── composer ───────────────────────────────────────────────────────
-  $("#composer").addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    const input = $("#composerInput");
-    const content = input.value.trim();
-    document.body.classList.remove("sidebar-open"); // hide keyboard-friendly drawer
-    if (!content || !state.currentRoomId) return;
-    input.value = "";
-    try {
-      await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
-    } catch (err) {
-      pushLocalSystem(`${err.message}`);
-      input.value = content;
-    }
-  });
-
-  $("#composerInput").addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey) {
-      ev.preventDefault();
-      $("#composer").requestSubmit();
-    }
-  });
-
-  // ── roster (drag&drop agents in/out of rooms) ──────────────────────
-  function renderRoster() {
-    const list = $("#rosterList");
-    if (!list) return;
-    const human = `<span class="roster-chip" data-agent="${HUMAN}"><span class="swatch" style="background:#27a644"></span>du</span>`;
-    list.innerHTML = human + state.agents.map((a) => `
-      <span class="roster-chip" draggable="true" data-agent="${a.id}">
-        <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} ${esc(a.name)}
-      </span>`).join("");
-    list.querySelectorAll('.roster-chip[draggable="true"]').forEach((chip) => {
-      chip.addEventListener("dragstart", (ev) => {
-        ev.dataTransfer.setData("text/agent-id", chip.dataset.agent);
-        ev.dataTransfer.effectAllowed = "copyMove";
-      });
-      // drop chip back onto roster = remove from current room
-      chip.addEventListener("dragover", (ev) => { ev.preventDefault(); chip.classList.add("dragover"); });
-      chip.addEventListener("dragleave", () => chip.classList.remove("dragover"));
-      chip.addEventListener("drop", async (ev) => {
-        ev.preventDefault(); chip.classList.remove("dragover");
-        const agentId = ev.dataTransfer.getData("text/agent-id");
-        if (!agentId || agentId === HUMAN || !state.currentRoomId) return;
-        await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${agentId}`);
-        await loadRooms();
-        await selectRoom(state.currentRoomId);
-      });
-    });
-  }
-  // ── boot ───────────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════
+  // Boot
+  // ═════════════════════════════════════════════════════════════════
   async function boot() {
     try {
-      const health = await api("GET", "/api/health");
-      state.adapters = health.adapters || ["echo"];
-      $("#brandName").textContent = health.name || "Agent Relay";
+      const h = await api("GET", "/api/health");
+      state.adapters = h.adapters || ["echo"];
+      $("#brandName").textContent = h.name || "Agent Relay";
     } catch { state.adapters = ["echo"]; }
-    await loadRooms();
-    await loadAgents();
-    state.projects = await api("GET", "/api/projects").catch(() => []);
-    connectWS();
+    await Promise.all([loadRooms(), loadAgents()]);
     if (state.rooms.length) selectRoom(state.rooms[0].id);
+    connectWS();
   }
-
   boot();
 })();

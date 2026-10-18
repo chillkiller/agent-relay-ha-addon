@@ -51,6 +51,57 @@ campsite.co/changelog/2023-02-22-grid-layout.
 - Grid-Layout-Gedanke für Board-/Übersichtsflächen (Raum-Grid statt reinem Listen-Fall).
 - Inter als UI-Schrift ist Campsite+Linear-Kompatibel — gut für ein Token-Set.
 
+## 4) OpenClaw Control-UI (claw-Theme) — DIE DNA, die GaRoN „sehr geil" findet
+
+Quelle: aus dem installierten OpenClaw selbst extrahiert
+(dist/control-ui/assets/control-ui-core-yIvVj14Y.css, Theme claw-dark/light).
+Das Relay übernimmt ab sofort diese Tokens 1:1 als Standard-Skin
+(„claw"-Kompatibilität), die Linear-Palette bleibt als alternative
+Board-Sprache (docs/DESIGN.md §1).
+
+### claw-dark (Standard)
+```
+--bg: #0e1015           /* Canvas */
+--bg-elevated: #191c24  /* Panels */
+--bg-hover: #1f2330
+--bg-muted: #1f2330
+--bg-accent: #13151b
+--border: #1e2028
+--border-strong: #2e3040
+--border-hover: #3e4050
+--text-strong: #f4f4f5
+--text: #bcbcc0         /* chat-text identisch */
+--accent: #ff5c5c       /* Claw-Rot — brand/focus/CTA */
+--accent-hover: #ff7070
+--accent-subtle: #ff5c5c1a
+--accent-glow: #ff5c5c33
+--accent-2: #14b8a6     /* Teal — sekundär */
+--ok: #22c55e  --danger: #f87171
+--radius-sm/md/lg/xl: 6/10/10/14/20  (Basis 10px!)
+```
+
+### claw-light (für den HA-Tag-Modus später)
+```
+--bg: #faf9f7  --bg-elevated: #fff  --border: #e8e4dc
+--text-strong: #211e1a  --text: #403c35  --accent: #bd4531
+```
+
+### Strukturwissen aus dem Control-UI (direkt aus dem CSS)
+- **Typo**: „Instrument Sans" (mit Segoe-UI-Fallbacks), display=body=chat —
+  EINE Familie, Gewicht/Hierarchie trägt die Gliederung
+- **Radius-Basis 10px** (nicht 8), xl=20, pill=9999 — weicher als Linear
+- **Shadows als Ladder** (sm→xl) statt Hairline-Only — Panels schweben dezent
+- **Sidebar-Formel**: `--sidebar-bg = color-mix(bg 96% + bg-elevated 4%)`,
+  Rows mit 20px Lead, 8px Row-Gap, Fade-Masks am Scroll-Rand
+- **chat-metriken**: text-size skaliert, block-gap = Textgröße,
+  Composer mit superellipse-Ecke!
+- **Agent-Avatar-System** mit Saturate/Opacity-Zuständen (offline=.55/.4)
+- **space-Skala** 4/8/12/16/20/24/32/40
+
+Die Control-UI-CSS-Quelle bleibt Referenz für die Relay-SPA — die Tokens sind
+jetzt direkt übernommen (styles.css), Muster (Sidebar-Fade, Avatar-States,
+superellipse-Composer) folgen in der nächsten Iteration.
+
 ## Token-Abbildung für Agent Relay (neues styles.css-Layout)
 
 ```
