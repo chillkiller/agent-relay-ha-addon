@@ -487,10 +487,10 @@
     if (!list) return;
     list.innerHTML = [
       `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du) oder hierher zurück = Raum verlassen">
-        <span class="avatar" style="background:var(--ok)">G</span>du</span>`,
+        <span class="avatar" style="background:var(--ok)">G</span>du<span class="presence"></span></span>`,
       ...state.agents.map((a) => `
         <span class="roster-chip ${a.enabled ? "" : "idle"}" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen (${a.enabled ? "online" : "aus"})">
-          <span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}
+          <span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence"></span>
         </span>`),
     ].join("");
     list.querySelectorAll('[draggable="true"]').forEach((chip) => {

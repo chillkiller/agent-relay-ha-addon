@@ -114,8 +114,8 @@ body {
 .room-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 6px 10px; border: 0; border-radius: var(--r-md);
-  background: none; color: var(--ink-3); cursor: pointer;
-  font: inherit; text-align: left;
+  background: none; color: var(--ink-2); /* B2 Muse R8: 6.8:1 statt 3.2:1 (WCAG AA) */
+  cursor: pointer; font: inherit; text-align: left;
 }
 .room-item:hover { background: var(--s2); color: var(--ink); }
 .room-item.active { background: var(--s2); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
@@ -164,12 +164,13 @@ body {
   font-size: 11px; font-weight: 600; color: var(--ink-4);
   text-transform: uppercase; letter-spacing: .8px;
 }
-.roster-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.roster-list { display: grid; grid-template-columns: 1fr; gap: 2px; } /* B3: Liste statt Chip-Wolke */
 .roster-chip {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 3px 10px 3px 4px; border-radius: var(--r-pill);
-  background: var(--s2); border: 1px solid var(--line);
-  color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: var(--r-md);
+  min-height: 32px;
+  background: none; border: 0;
+  color: var(--ink-2); font-size: 13px; font-weight: 500;
   cursor: grab; user-select: none; max-width: 100%;
 }
 .roster-chip:hover { border-color: var(--line-2); background: var(--s3); }
@@ -185,6 +186,9 @@ body {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--ok); box-shadow: 0 0 0 2px var(--s1);
 }
+.roster-chip .presence { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+.roster-chip.idle .presence { background: var(--warn); }
+.roster-chip:hover { background: var(--s2); } /* hover-highlight in Listenform */
 .roster-chip.idle .avatar::after { background: var(--warn); }
 .roster-chip.unknown .avatar::after { background: none; border: 1.5px solid var(--line-3); }
 .roster-add {
@@ -347,17 +351,25 @@ body {
 
 /* Composer */
 .composer {
+  /* B1 Muse R8: schwebende Karte (verankert am Fuß), kein abgetrennter Balken */
   display: flex; align-items: flex-end; gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-6);
-  background: var(--s1); border-top: 1px solid var(--line);
-  max-width: 980px; margin: 0 auto; width: 100%;
-  box-shadow: 0 -8px 20px rgba(1,1,2,.4);
+  padding: var(--sp-3);
+  background: var(--s2); border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 948px; margin: 0 var(--sp-4) var(--sp-4) auto; /* float card, rechtsbündig im Thread-Fluss */
+  width: calc(100% - var(--sp-6) - 16px);
+  position: relative;
 }
+@supports (corner-shape: superellipse(1.5)) {
+  .composer { corner-shape: superellipse(1.5); }
+}
+.messages { gap: var(--sp-2); padding-bottom: var(--sp-5); } /* dichterer Thread (8px) */
 .composer textarea {
   flex: 1; resize: none; max-height: 160px;
-  background: var(--s2); border: 1px solid var(--line);
+  background: var(--canvas); border: 1px solid var(--line);
   color: var(--ink); caret-color: var(--accent-hover);
-  border-radius: var(--r-lg); padding: 10px 14px; font: inherit;
+  border-radius: var(--r-md); padding: 10px 14px; font: inherit;
   transition: border-color .12s;
 }
 .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-tint); }
