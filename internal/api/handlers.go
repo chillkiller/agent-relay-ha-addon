@@ -4,6 +4,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
@@ -18,15 +19,25 @@ import (
 	"agentrelay/internal/store"
 )
 
+// sub is one connected websocket client with its own serialized write pump.
+// coder/websocket requires sequential Writes per connection; a dedicated
+// goroutine also keeps slow clients from blocking the hub (review C-1/M-5).
+type sub struct {
+	conn *websocket.Conn
+	out  chan []byte
+	done chan struct{}
+}
+
 type Server struct {
-	st  *store.DB
-	rt  *runtime.Runtime
-	mu  sync.RWMutex
-	subs map[*websocket.Conn]bool
+	st     *store.DB
+	rt     *runtime.Runtime
+	mu     sync.RWMutex
+	subs   map[*sub]bool
+	bearer string // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
 }
 
 func New(st *store.DB, rt *runtime.Runtime) *Server {
-	s := &Server{st: st, rt: rt, subs: map[*websocket.Conn]bool{}}
+	s := &Server{st: st, rt: rt, subs: map[*sub]bool{}}
 	broadcast = s.broadcast
 	rt.SetBus(hubAdapter{})
 	return s
@@ -47,13 +58,57 @@ func (hubAdapter) Publish(event string, payload map[string]any) {
 // through it (the two are decoupled so runtime keeps no api import).
 var broadcast func(map[string]any)
 
+// broadcast enqueues for every client; per-sub write pumps own the writes.
+// Never blocks on slow peers; a full queue closes that client (slow-consumer
+// isolation) instead of stalling the hub.
 func (s *Server) broadcast(data map[string]any) {
-	b, _ := json.Marshal(data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for c := range s.subs {
-		if err := c.Write(context.Background(), websocket.MessageText, b); err != nil {
-			go func(c *websocket.Conn) { _ = c.Close(websocket.StatusInternalError, "write failed") }(c)
+	targets := make([]*sub, 0, len(s.subs))
+	for sub := range s.subs {
+		targets = append(targets, sub)
+	}
+	s.mu.RUnlock()
+	for _, sub := range targets {
+		select {
+		case sub.out <- b:
+		default:
+			// slow consumer: drop it from the hub outside any read path
+			go s.dropSub(sub, "slow consumer")
+		}
+	}
+}
+
+// dropSub unregisters and closes a client exactly once.
+func (s *Server) dropSub(sub *sub, reason string) {
+	s.mu.Lock()
+	_, present := s.subs[sub]
+	delete(s.subs, sub)
+	s.mu.Unlock()
+	if !present {
+		return
+	}
+	close(sub.done) // write pump exits on done
+	_ = sub.conn.Close(websocket.StatusNormalClosure, reason)
+}
+
+// writePump serializes writes for one connection and exits on first failure.
+func (s *Server) writePump(sub *sub) {
+	for {
+		select {
+		case <-sub.done:
+			return
+		case msg := <-sub.out:
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := sub.conn.Write(ctx, websocket.MessageText, msg); err != nil {
+				cancel()
+				s.dropSub(sub, "write failed")
+				return
+			}
+			cancel()
 		}
 	}
 }
@@ -62,6 +117,7 @@ func (s *Server) broadcast(data map[string]any) {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	_ = s.bearer
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
@@ -93,7 +149,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.deleteTask)
 
 	mux.HandleFunc("GET /ws", s.ws)
-	return logMiddleware(mux)
+	return mux
 }
 
 func logMiddleware(next http.Handler) http.Handler {
@@ -104,7 +160,41 @@ func logMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) Handler() http.Handler { return s.routes() }
+func (s *Server) SetBearer(tok string) { s.bearer = tok }
+
+// authorized: constant-time bearer check via header (REST) or ?token= (WS).
+func (s *Server) authorized(r *http.Request) bool {
+	if s.bearer == "" {
+		return true
+	}
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(s.bearer)) == 1 {
+		return true
+	}
+	if tok := r.URL.Query().Get("token"); tok != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.bearer)) == 1 {
+		return true
+	}
+	return false
+}
+
+// Handler composes: optional bearer gate → routes → logging.
+// /api/health stays open so the Supervisor watchdog can probe.
+func (s *Server) Handler() http.Handler {
+	mux := s.routes()
+	var h http.Handler = mux
+	if s.bearer != "" {
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/health" || s.authorized(r) {
+				mux.ServeHTTP(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "auth required"})
+		})
+	}
+	return logMiddleware(h)
+}
 
 // ── helpers ─────────────────────────────────────────────────────────
 
@@ -144,7 +234,14 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, s.st.GetSettings())
+	out := s.st.GetSettings()
+	// write-only token: never return the stored secret (review C-2)
+	if tok, ok := out["openclawToken"].(string); ok && tok != "" {
+		out["openclawToken"] = "***"
+	} else {
+		out["openclawToken"] = ""
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +252,13 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, v := range body {
 		if _, ok := map[string]bool{"relayName": true, "theme": true, "openclawBaseUrl": true, "openclawToken": true}[k]; ok {
-			s.st.UpdateSetting(k, v)
+			if k == "openclawToken" && (v == "***" || strings.TrimSpace(v) == "") {
+				continue // placeholder or cleared field never overwrites the secret
+			}
+			if err := s.st.UpdateSetting(k, v); err != nil {
+				errJSON(w, 500, err.Error())
+				return
+			}
 		}
 	}
 	writeJSON(w, 200, s.st.GetSettings())

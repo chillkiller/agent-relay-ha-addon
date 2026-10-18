@@ -2,12 +2,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"agentrelay/internal/adapter"
 	"agentrelay/internal/api"
@@ -39,6 +44,10 @@ func main() {
 	rt.Register(adapter.OpenClaw{})
 
 	srv := api.New(st, rt)
+	if tok := os.Getenv("RELAY_BEARER_TOKEN"); tok != "" {
+		srv.SetBearer(tok)
+		log.Println("[relay] API bearer gate enabled (RELAY_BEARER_TOKEN)")
+	}
 
 	apiHandler := srv.Handler()
 	spaHandler := webpkg.SPA(nil)
@@ -53,7 +62,19 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%s", host, port)
 	log.Printf("[relay] listening on http://%s (data: %s)", addr, dataDir)
-	if err := http.ListenAndServe(addr, root); err != nil {
+
+	server := &http.Server{Addr: addr, Handler: root}
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		log.Println("[relay] shutting down…")
+		rt.Stop()                      // cancel pending turn schedules (H-1)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }

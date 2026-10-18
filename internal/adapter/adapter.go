@@ -42,6 +42,8 @@ type AgentConfig struct {
 	Model        string
 	BaseURL      string
 	APIKey       string
+	// IdempotencyKey (optional) derives retry-safe run ids (openclaw adapter).
+	IdempotencyKey string
 }
 
 // Settings are resolved global settings snapshot.

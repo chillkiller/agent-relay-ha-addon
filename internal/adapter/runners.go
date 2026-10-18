@@ -94,7 +94,7 @@ func streamOpenAI(url string, a AgentConfig, model string, history []Message, ou
 		req.Header.Set(hdrAuthorization, "Bearer "+a.APIKey)
 	}
 
-	client := &http.Client{Timeout: 200 * time.Second}
+	client := &http.Client{Timeout: 170 * time.Second} // < 180s ctx (review M-1)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("verbindung: %w", err)

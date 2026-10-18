@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -21,12 +22,14 @@ type Bus interface {
 }
 
 type Runtime struct {
-	st        *store.DB
-	bus       Bus
-	adapters  map[string]adapter.Adapter
-	mu        sync.Mutex
-	lastUser  map[string]*store.Message // roomID -> last user message snapshot (for history anchor)
-	stop      chan struct{}
+	st       *store.DB
+	bus      Bus
+	mu       sync.RWMutex
+	adapters map[string]adapter.Adapter
+	// cancels tracks per-message fan-out so Shutdown()/Stop can revoke
+	// scheduled turns immediately (review H-1).
+	cancels map[string]context.CancelFunc
+	stop    chan struct{}
 }
 
 func New(st *store.DB, bus Bus) *Runtime {
@@ -34,9 +37,26 @@ func New(st *store.DB, bus Bus) *Runtime {
 		st:       st,
 		bus:      bus,
 		adapters: map[string]adapter.Adapter{},
-		lastUser: map[string]*store.Message{},
+		cancels:  map[string]context.CancelFunc{},
 		stop:     make(chan struct{}),
 	}
+}
+
+// Stop revokes all pending turn schedules and marks the runtime as stopping
+// (running turns finish; scheduled delays are cancelled). Idempotent.
+func (r *Runtime) Stop() {
+	r.mu.Lock()
+	select {
+	case <-r.stop:
+		// already stopped
+	default:
+		close(r.stop)
+	}
+	for msgKey, cancel := range r.cancels {
+		cancel()
+		delete(r.cancels, msgKey)
+	}
+	r.mu.Unlock()
 }
 
 func (r *Runtime) Register(a adapter.Adapter) { r.adapters[a.ID()] = a }
@@ -73,9 +93,22 @@ func (r *Runtime) OnUserMessage(m *store.Message) {
 	for i, a := range targets {
 		agent := a
 		delay := time.Duration(i) * 900 * time.Millisecond
+		ctx, cancel := context.WithTimeout(context.Background(), delay+10*time.Minute)
+		r.mu.Lock()
+		// key: message+agent pair so repeated sends cancel cleanly on Stop()
+		r.cancels[m.ID+"|"+agent.ID] = cancel
+		r.mu.Unlock()
 		go func() {
+			defer func() {
+				r.mu.Lock()
+				delete(r.cancels, m.ID+"|"+agent.ID)
+				r.mu.Unlock()
+				cancel()
+			}()
 			select {
 			case <-time.After(delay):
+			case <-ctx.Done():
+				return // cancelled (shutdown or superseded)
 			case <-r.stop:
 				return
 			}
@@ -151,12 +184,17 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	}
 	if cfg.BaseURL == "" {
 		settings := r.st.GetSettings()
-		cfg.BaseURL, _ = settings["openclawBaseUrl"].(string)
+		sv, _ := settings["openclawBaseUrl"].(string)
+		// env fallback (review H-2): the add-on injects options; UI wins,
+		// env fills gaps so operators can configure either way.
+		cfg.BaseURL = firstNonEmpty(sv, os.Getenv("RELAY_OPENAI_BASE_URL"))
 	}
 	if cfg.APIKey == "" {
 		settings := r.st.GetSettings()
-		cfg.APIKey, _ = settings["openclawToken"].(string)
+		tk, _ := settings["openclawToken"].(string)
+		cfg.APIKey = firstNonEmpty(tk, os.Getenv("RELAY_OPENAI_API_KEY"))
 	}
+	cfg.IdempotencyKey = userMsg.ID
 
 	// stream placeholder row first, so ordering in UI is stable
 	msgID := store.NewID("msg")
@@ -230,11 +268,9 @@ func (r *Runtime) history(agentID, roomID string) []adapter.Message {
 		case "human":
 			out = append(out, adapter.Message{Role: "user", Name: m.SenderName, Content: m.Content})
 		case "agent":
-			// include other agents' messages as assistant context with name hints
-			role := "assistant"
-			name := m.SenderName
+			// include agents' messages as assistant context with name hints
+			out = append(out, adapter.Message{Role: "assistant", Name: m.SenderName, Content: m.Content})
 			_ = agentID
-			out = append(out, adapter.Message{Role: role, Name: name, Content: m.Content})
 		}
 	}
 	// The last entry should be the user's message (guaranteed by DB ordering
@@ -257,3 +293,9 @@ func updated(st *store.DB, id string) any {
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 var _ = context.Background // reserve for future ctx plumbing
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" { return v }
+	}
+	return ""
+}

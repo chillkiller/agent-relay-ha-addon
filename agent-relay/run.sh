@@ -15,6 +15,7 @@ export RELAY_DATA_DIR=/data
 export RELAY_USER_NAME="$(opt relay_user_name)"
 export RELAY_OPENAI_BASE_URL="$(opt openclaw_base_url)"
 export RELAY_OPENAI_API_KEY="$(opt openclaw_token)"
+export RELAY_BEARER_TOKEN="$(opt api_bearer_token)"
 
 echo "[relay] starting agentrelay (user=$(id -un), data=$RELAY_DATA_DIR)"
 if [ -n "$RELAY_OPENAI_BASE_URL" ]; then

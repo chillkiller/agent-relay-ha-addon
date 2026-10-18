@@ -43,10 +43,13 @@ options:
   relay_user_name: gaRON
   openclaw_base_url: "http://localhost:18789/v1"
   openclaw_token: ""
+  # Optional: wenn gesetzt, verlangt die Relay-API Bearer/ ?token= (LAN-Schutz)
+  api_bearer_token: ""
   log_level: info
 
 schema:
   relay_user_name: str?
   openclaw_base_url: str?
   openclaw_token: str?
+  api_bearer_token: str?
   log_level: list(info|debug|warn|error)?

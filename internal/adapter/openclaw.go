@@ -90,7 +90,7 @@ type wsFrame struct {
 }
 
 func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 190*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // long agent runs (review H-3)
 	defer cancel()
 
 	dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
@@ -125,7 +125,7 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 	if agentID == "" || agentID == "openclaw" {
 		agentID = "" // default agent of the gateway
 	}
-	runID := fmt.Sprintf("relay-%x-%d", a.ID, time.Now().UnixNano())
+	runID := firstNonEmpty(a.IdempotencyKey, fmt.Sprintf("relay-%s-%d", a.ID, time.Now().UnixNano()))
 	agentReq := map[string]any{
 		"message": trigger,
 		"idempotencyKey": runID,
@@ -149,7 +149,10 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 	_ = json.Unmarshal(res.Payload, &accepted)
 
 	// 4) agent.wait → terminal snapshot with response text
-	waitRes, err := rpc(ctx, conn, "agent.wait", map[string]any{
+	// independent wait window so a stalled wait still surfaces status (M-4)
+	waitCtx, waitCancel := context.WithTimeout(ctx, 8*time.Minute)
+	defer waitCancel()
+	waitRes, err := rpc(waitCtx, conn, "agent.wait", map[string]any{
 		"runId": firstNonEmpty(accepted.RunID, runID),
 	})
 	if err != nil {
@@ -268,12 +271,10 @@ func rpc(ctx context.Context, conn *websocket.Conn, method string, params map[st
 	}
 }
 
+// sessionKey: stable per-agent relay session (Paperclip prefix pattern;
+// "agent:<id>" matches the gateway-conventional agent namespace).
 func sessionKey(a AgentConfig) string {
-	// cfg.Model may be "openclaw/<agentId>"; relay room binding arrives in
-	// BaseURL-like config? For v1 the relay sets cfg.ID = agent row id, and
-	// the runtime prefixes the room. We accept the room via cfg.Name prefix
-	// convention? Simplify v1: stable per-agent session under namespace relay.
-	return fmt.Sprintf("relay:%s", a.ID)
+	return fmt.Sprintf("agent:%s:relay", a.ID)
 }
 
 func firstNonEmpty(vals ...string) string {

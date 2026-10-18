@@ -35,11 +35,12 @@ func (d *DB) GetSettings() Settings {
 	return Settings(out)
 }
 
-func (d *DB) UpdateSetting(key string, value string) {
-	_, _ = d.db.Exec(
+func (d *DB) UpdateSetting(key string, value string) error {
+	_, err := d.db.Exec(
 		`INSERT INTO settings (key, value) VALUES (?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
+	return err // surfaced to the caller (review L-3)
 }
 
 // ── agents ──────────────────────────────────────────────────────────
@@ -266,9 +267,27 @@ func (d *DB) UpdateRoom(r *Room) error {
 	if r.ProjectID != nil && *r.ProjectID != "" {
 		pid = *r.ProjectID
 	}
-	_, err := d.db.Exec(`UPDATE rooms SET name=?, project_id=?, updated_at=? WHERE id=?`,
-		r.Name, pid, now(), r.ID)
-	return err
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE rooms SET name=?, project_id=?, updated_at=? WHERE id=?`,
+		r.Name, pid, now(), r.ID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	// full member sync (review H-4): patchRoom sends the complete member list
+	if _, err := tx.Exec(`DELETE FROM room_members WHERE room_id=?`, r.ID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	for _, aid := range r.MemberAgentIDs {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO room_members (room_id,agent_id) VALUES (?,?)`, r.ID, aid); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *DB) DeleteRoom(id string) error {

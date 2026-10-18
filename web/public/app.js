@@ -180,6 +180,7 @@
   async function loadMessages() {
     if (!state.currentRoomId) return;
     state.messages = {};
+    Object.keys(streamBuf).forEach((k) => delete streamBuf[k]); // review M-3
     const list = await api("GET", `/api/rooms/${state.currentRoomId}/messages`);
     for (const m of list) state.messages[m.id] = m;
     renderMessages(true);

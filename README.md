@@ -74,6 +74,7 @@ fcntl-Locks — niemals auf SMB/NFS-Mounts betreiben).
 | `openclaw_base_url` | `http://localhost:18789/v1` | Gateway-/LLM-Basis-URL |
 | `openclaw_token` | – | Bearer (OpenClaw-Gateway-Token, Ollama braucht nichts) |
 | `log_level` | `info` | Loglevel |
+| `api_bearer_token` | – | Optional: wenn gesetzt, verlangt die API Bearer-Token oder `?token=` (LAN-Schutz; `/api/health` bleibt offen für den Watchdog) |
 
 Für OpenClaw nativ (statt `/v1/...`): Agent in der UI anlegen, Adapter
 `openclaw`, Basis-URL `ws://<gateway-host>:18789`, Token = Gateway-Token,

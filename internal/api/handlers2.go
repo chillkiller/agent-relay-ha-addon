@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -410,23 +409,33 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	sub := &sub{conn: conn, out: make(chan []byte, 64), done: make(chan struct{})}
 	s.mu.Lock()
-	s.subs[conn] = true
+	s.subs[sub] = true
 	s.mu.Unlock()
 
-	hello, _ := json.Marshal(map[string]any{"type": "hello", "ts": time.Now().UnixMilli()})
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	_ = conn.Write(ctx, websocket.MessageText, hello)
-	cancel()
+	go s.writePump(sub)
 
-	// keep read pump for close/Pings; we never expect data frames
+	hello, _ := json.Marshal(map[string]any{"type": "hello", "ts": time.Now().UnixMilli()})
+	select {
+	case sub.out <- hello:
+	default: // queue full right after connect: treat as dead client
+		s.dropSub(sub, "queue full")
+		return
+	}
+
+	// read pump: block until the client disconnects / gets dropped.
 	for {
 		if _, _, err := conn.Read(r.Context()); err != nil {
 			break
 		}
 	}
 	s.mu.Lock()
-	delete(s.subs, conn)
+	_, present := s.subs[sub]
+	delete(s.subs, sub)
 	s.mu.Unlock()
-	_ = conn.Close(websocket.StatusNormalClosure, "bye")
+	if present {
+		close(sub.done)
+		_ = conn.Close(websocket.StatusNormalClosure, "bye")
+	}
 }
