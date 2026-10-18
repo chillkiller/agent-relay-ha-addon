@@ -103,6 +103,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 
 type roomBody struct {
 	Name      string   `json:"name"`
+	Kind      string   `json:"kind"` // chat | project
 	ProjectID *string  `json:"projectId"`
 	AgentIDs  []string `json:"agentIds"`
 	// member endpoints:
@@ -134,9 +135,17 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	if len(b.AgentIDs) == 0 {
 		b.AgentIDs = []string{}
 	}
+	if b.Kind == "" {
+		b.Kind = "chat"
+	}
+	if b.Kind != "chat" && b.Kind != "project" {
+		errJSON(w, 400, "kind muss chat oder project sein")
+		return
+	}
 	room := &store.Room{
 		ID:             newIDs("room"),
 		Name:           b.Name,
+		Kind:           b.Kind,
 		ProjectID:      b.ProjectID,
 		MemberAgentIDs: b.AgentIDs,
 		CreatedAt:      nowISO(),
@@ -169,6 +178,13 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Name != "" {
 		room.Name = b.Name
+	}
+	if b.Kind != "" {
+		if b.Kind != "chat" && b.Kind != "project" {
+			errJSON(w, 400, "kind muss chat oder project sein")
+			return
+		}
+		room.Kind = b.Kind
 	}
 	if hasJSON(r, "projectId") {
 		room.ProjectID = b.ProjectID

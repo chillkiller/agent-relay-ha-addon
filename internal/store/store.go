@@ -5,9 +5,11 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -44,7 +46,8 @@ type Project struct {
 type Room struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
-	ProjectID      *string  `json:"projectId"`
+	Kind           string   `json:"kind"` // "chat" | "project" (project rooms carry the task board)
+	ProjectID      *string  `json:"projectId"` // legacy link; project-kind rooms are the room themselves
 	CreatedAt      string   `json:"createdAt"`
 	UpdatedAt      string   `json:"updatedAt"`
 	MemberAgentIDs []string `json:"memberAgentIds"`
@@ -121,6 +124,17 @@ func tryWAL(db *sql.DB) error {
 }
 
 func migrate(db *sql.DB) error {
+	// idempotent upgrade for pre-existing databases (rooms.kind, 2026-10-18)
+	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'`); err == nil {
+	} else if !strings.Contains(err.Error(), "duplicate column") {
+		_ = err // tolerate; verify next
+	}
+	prag := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('rooms') WHERE name='kind'`)
+	var kindCols int
+	_ = prag.Scan(&kindCols)
+	if kindCols == 0 {
+		return errors.New("migration failed: rooms.kind missing")
+	}
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -137,7 +151,9 @@ CREATE TABLE IF NOT EXISTS projects (
   color TEXT NOT NULL DEFAULT '#8a7ff0', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS rooms (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project')),
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS room_members (

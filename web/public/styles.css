@@ -1,13 +1,20 @@
+/* Design tokens — Linear-derived (docs/DESIGN.md, human-made reference):
+   canvas #010102, 4-step surface ladder, hairlines, ONE accent #5e6ad2. */
 :root {
-  --bg: #0d1117;
-  --bg-panel: #151b23;
-  --bg-raised: #1b232d;
-  --border: #2a3441;
-  --text: #e6edf3;
-  --muted: #8b98a5;
-  --accent: #6ea8fe;
-  --accent-2: #8a7ff0;
-  --ok: #3fb950;
+  --bg: #010102;              /* canvas */
+  --bg-panel: #0f1011;        /* surface-1 */
+  --bg-raised: #141516;       /* surface-2 */
+  --bg-lift: #18191a;         /* surface-3 (hover/menus) */
+  --bg-lift-2: #191a1b;       /* surface-4 */
+  --border: #23252a;          /* hairline */
+  --border-strong: #34343a;
+  --text: #f7f8f8;            /* ink */
+  --muted: #8a8f98;           /* ink-subtle */
+  --muted-2: #d0d6e0;         /* ink-muted */
+  --accent: #5e6ad2;          /* lavender — brand/focus/CTA only */
+  --accent-hover: #828fff;
+  --accent-focus: #5e69d1;
+  --ok: #27a644;
   --err: #f85149;
 }
 
@@ -108,7 +115,7 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   background: var(--accent); color: #0b1420; border: 0; border-radius: 10px;
   width: 46px; cursor: pointer; font-size: 16px;
 }
-.composer button:hover { background: #8bb6ff; }
+.composer button:hover { background: var(--accent-hover); }
 
 /* Cards (Agents) */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; padding: 20px; overflow-y: auto; }
@@ -127,7 +134,7 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 }
 .btn:hover { border-color: var(--muted); }
 .btn.accent { background: var(--accent); border-color: var(--accent); color: #0b1420; }
-.btn.accent:hover { background: #8bb6ff; }
+.btn.accent:hover { background: var(--accent-hover); }
 .btn.danger { color: var(--err); }
 .btn.danger:hover { border-color: var(--err); }
 
