@@ -79,7 +79,9 @@ type Task struct {
 	UpdatedAt string  `json:"updatedAt"`
 }
 
-func now() string { return time.Now().UTC().Format(time.RFC3339) }
+// RFC3339 with fixed 9-digit nanoseconds: lexicographically sortable, no
+// collisions on rapid inserts (review-2 L-A).
+func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00") }
 
 func Open(dataDir string) (*DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {

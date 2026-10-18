@@ -81,12 +81,20 @@ func gatewayWSURL(base string) string {
 }
 
 type wsFrame struct {
-	Type    string          `json:"type"` // "req"|"res"|"event"
-	ID      string          `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	OK      *bool           `json:"ok,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Event   string          `json:"event,omitempty"`
+	Type   string `json:"type"` // "req" | "res" | "event"
+	ID     string `json:"id,omitempty"`
+	Method string `json:"method,omitempty"`
+	OK     *bool  `json:"ok,omitempty"`
+	// Gateway contract (docs/gateway/protocol): requests carry "params",
+	// responses/events carry "payload". Using one field for both was the
+	// round-3 protocol bug: req frames validated as invalid.
+	Params    json.RawMessage `json:"params,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Event     string          `json:"event,omitempty"`
+	Error     *struct {
+		Code    string `json:"code,omitempty"`
+		Message string `json:"message,omitempty"`
+	} `json:"error,omitempty"`
 }
 
 func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
@@ -133,7 +141,10 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 	if agentID != "" {
 		agentReq["agentId"] = agentID
 	}
-	if sk := firstNonEmpty(a.SessionKey, sessionKey(a)); sk != "" {
+	// sessionKey namespace must match the gateway agent name (gateway policy:
+	// 'agent "coordinator" does not match session key agent "..."'): derive
+	// from the TARGET agent id (model field), with a room suffix for isolation.
+	if sk := firstNonEmpty(a.SessionKey, sessionKeyFor(agentID, a.ID)); sk != "" {
 		agentReq["sessionKey"] = sk
 	}
 	agentReq["timeout"] = 480000 // match 8-min wait window (review-2 M-A)
@@ -159,11 +170,17 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 		return "", fmt.Errorf("agent.wait: %w", err)
 	}
 	var waitPayload struct {
-		Text   string `json:"text"`
 		Status string `json:"status"`
 		Error  *struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		// terminalReply snapshot (docs: AgentRunTerminalReplySnapshot):
+		// visible→text | silent | empty(+code)
+		TerminalReply struct {
+			Disposition string `json:"disposition"`
+			Text        string `json:"text"`
+			Code        string `json:"code"`
+		} `json:"terminalReply"`
 	}
 	if err := json.Unmarshal(waitRes.Payload, &waitPayload); err != nil {
 		return "", fmt.Errorf("agent.wait payload: %w", err)
@@ -171,10 +188,15 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 	if waitPayload.Error != nil && waitPayload.Error.Message != "" {
 		return "", fmt.Errorf("openclaw: %s", waitPayload.Error.Message)
 	}
-	if strings.TrimSpace(waitPayload.Text) == "" {
-		return "", fmt.Errorf("openclaw: leere Antwort (%s, gw %s)", statusOr(accepted.Status, waitPayload.Status), helloPayload.Server.Version)
+	reply := waitPayload.TerminalReply
+	switch {
+	case reply.Disposition == "visible" && strings.TrimSpace(reply.Text) != "":
+		return reply.Text, nil
+	case reply.Disposition == "empty":
+		return "", fmt.Errorf("openclaw: leere Antwort (disposition=empty code=%s, gw %s)", reply.Code, helloPayload.Server.Version)
+	default:
+		return "", fmt.Errorf("openclaw: keine sichtbare Antwort (disposition=%s status=%s, gw %s)", reply.Disposition, statusOr(accepted.Status, waitPayload.Status), helloPayload.Server.Version)
 	}
-	return waitPayload.Text, nil
 }
 
 func authHeader(a AgentConfig) http.Header {
@@ -217,17 +239,19 @@ func handshake(ctx context.Context, conn *websocket.Conn, a AgentConfig) (*wsFra
 	_ = nonce // nonce is optional for token auth; kept for parity
 
 	params := map[string]any{
-		"minProtocol": 3,
+		"minProtocol": 4,
 		"maxProtocol": 4,
 		"client": map[string]any{
-			"id":       "agent-relay",
+			"id":       "cli", // allowed ids: cli/webchat/openclaw-control-ui/… (gateway whitelist)
 			"version":  "0.1.0",
 			"platform": "linux",
-			"mode":     "operator",
+			"mode":     "cli", // allowed modes: cli/ui/webchat/backend/… (gateway whitelist)
 		},
 		"role":    "operator",
 		"scopes":  []string{"operator.read", "operator.write"},
 		"caps":    []string{},
+		"commands": []string{},
+		"permissions": map[string]any{},
 		"locale":  "de-DE",
 		"userAgent": "agent-relay/0.1.0",
 	}
@@ -241,7 +265,7 @@ func rpc(ctx context.Context, conn *websocket.Conn, method string, params map[st
 	id := fmt.Sprintf("req-%d", time.Now().UnixNano())
 	frame := wsFrame{Type: "req", ID: id, Method: method}
 	paramsBytes, _ := json.Marshal(params)
-	frame.Payload = paramsBytes
+	frame.Params = paramsBytes // req carries "params" (gateway contract)
 	out, _ := json.Marshal(frame)
 	writeCtx, writeCancel := context.WithTimeout(ctx, 10*time.Second)
 	if err := conn.Write(writeCtx, websocket.MessageText, out); err != nil {
@@ -261,8 +285,15 @@ func rpc(ctx context.Context, conn *websocket.Conn, method string, params map[st
 			continue
 		}
 		if f.Type == "res" && f.ID == pendingID {
-			if f.OK != nil && !*f.OK {
-				return nil, fmt.Errorf("%s: %s", method, string(f.Payload))
+			if (f.OK != nil && !*f.OK) || f.Error != nil {
+				msg := ""
+				if f.Error != nil {
+					msg = f.Error.Message
+				}
+				if msg == "" {
+					msg = string(f.Payload)
+				}
+				return nil, fmt.Errorf("%s: %s", method, msg)
 			}
 			return &f, nil
 		}
@@ -271,10 +302,15 @@ func rpc(ctx context.Context, conn *websocket.Conn, method string, params map[st
 	}
 }
 
-// sessionKey: stable per-agent relay session (Paperclip prefix pattern;
-// "agent:<id>" matches the gateway-conventional agent namespace).
-func sessionKey(a AgentConfig) string {
-	return fmt.Sprintf("agent:%s:relay", a.ID)
+// sessionKeyFor: gateway-conventional session key: agent:<gateway-agent>:relay:<roomKey>
+// (gateway checks that the leading namespace matches the target agent; the
+// relay room suffix keeps turns of different rooms separate).
+func sessionKeyFor(gatewayAgentID, _ string) string {
+	ns := gatewayAgentID
+	if ns == "" {
+		ns = "main" // gateway default agent
+	}
+	return fmt.Sprintf("agent:%s:relay", ns)
 }
 
 func firstNonEmpty(vals ...string) string {

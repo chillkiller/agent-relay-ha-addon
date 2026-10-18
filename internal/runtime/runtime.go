@@ -226,7 +226,14 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		cfg.APIKey = firstNonEmpty(tk, os.Getenv("RELAY_OPENAI_API_KEY"))
 	}
 	cfg.IdempotencyKey = userMsg.ID
-	cfg.SessionKey = fmt.Sprintf("agent:%s:relay:%s", a.ID, userMsg.RoomID)
+	// gateway-agent namespace (review: 'agent "coordinator" does not match
+	// session key agent "agent_…"'): derive from the configured agent target
+	// (model field), not the relay-DB row id. Room suffix keeps rooms apart.
+	target := strings.TrimPrefix(strings.TrimPrefix(a.Model, "openclaw/"), "agent:")
+	if target == "" || target == "openclaw" {
+		target = "main" // gateway default agent
+	}
+	cfg.SessionKey = fmt.Sprintf("agent:%s:relay:%s", target, userMsg.RoomID)
 
 	// stream placeholder row first, so ordering in UI is stable
 	msgID := store.NewID("msg")

@@ -280,7 +280,8 @@ func (d *DB) UpdateRoom(r *Room) error {
 		tx.Rollback()
 		return err
 	}
-	// full member sync (review H-4): patchRoom sends the complete member list
+	// full member sync (review H-4): caller always supplies the complete
+	// member list (createRoom + patchRoom rosters)
 	if _, err := tx.Exec(`DELETE FROM room_members WHERE room_id=?`, r.ID); err != nil {
 		tx.Rollback()
 		return err

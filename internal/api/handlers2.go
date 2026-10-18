@@ -233,6 +233,11 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 	if fieldPresent(raw, "projectId") {
 		room.ProjectID = b.ProjectID
 	}
+	// roster replacement on PATCH (review-2 M-1): explicit agentIds wins,
+	// otherwise the loaded roster is preserved
+	if fieldPresent(raw, "agentIds") && b.AgentIDs != nil {
+		room.MemberAgentIDs = b.AgentIDs
+	}
 	room.UpdatedAt = nowISO()
 	if err := s.st.UpdateRoom(room); err != nil {
 		log.Printf("[api] store error: %v", err)
