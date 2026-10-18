@@ -13,9 +13,6 @@ startup: services
 boot: auto
 init: false
 host_network: false
-icon: >-
-  https://raw.githubusercontent.com/GaRoN/agent-desktop-ha-app/main/docs/icon.svg
-
 # Home Assistant Ingress (app page / companion app sidebar)
 ingress: true
 ingress_port: 8099

@@ -36,6 +36,7 @@ func main() {
 	rt := runtime.New(st, nil)
 	rt.Register(adapter.Echo{})
 	rt.Register(adapter.OpenAI{})
+	rt.Register(adapter.OpenClaw{})
 
 	srv := api.New(st, rt)
 
