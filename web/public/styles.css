@@ -143,6 +143,11 @@ body {
   display: inline-block; width: max-content;
   transition: transform 180ms ease-out;
 }
+/* B3 Muse: Fade-Affordance auch im Ruhezustand (DNA Sidebar-Formel);
+   Scroll-Transform bleibt hover-only */
+.marquee--overflowing {
+  mask-image: linear-gradient(to right, black calc(100% - var(--marquee-fade)), transparent);
+}
 .room-item:hover .marquee--overflowing {
   mask-image: linear-gradient(to right, transparent, black var(--marquee-fade), black calc(100% - var(--marquee-fade)), transparent);
 }
@@ -267,7 +272,11 @@ body {
   color: #fff;
   border-top-right-radius: var(--r-xs);
 }
-.msg.agent .content { border-top-left-radius: var(--r-xs); }
+.msg.agent .content {
+  border-top-left-radius: var(--r-xs);
+  border: 1px solid var(--line);        /* B2 Muse: Hairline statt verschwommen */
+  background: var(--s1);                /* s1: ein Schritt Tiefe über s2-Niveau */
+}
 .msg.agent .meta { justify-content: flex-start; }
 .msg.human .meta { justify-content: flex-end; flex-direction: row-reverse; }
 .msg.system { align-self: center; max-width: 88%; }

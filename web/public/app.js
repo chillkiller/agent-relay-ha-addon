@@ -257,7 +257,8 @@
       t.classList.toggle("active", t.dataset.tab === "chat"));
     showTab("chat");
     await loadMessages();
-    $("#composerInput").focus({ preventScroll: true });
+    // B1 Muse: kein Autofokus beim Raumwechsel — der Composer-Rahmen bleibt
+    // im Ruhe-Zustand (Hairline); Fokus gehört nur zur echten Nutzer-Absicht.
   }
 
   function renderMemberChips(room) {
