@@ -42,6 +42,11 @@
   // streamed token buffers per message id (survive re-renders)
   const streamBuf = {};
 
+  // ── mobile drawer ─────────────────────────────────────────────────
+  const drawer = () => document.body.classList.contains("sidebar-open");
+  $("#burger").addEventListener("click", () =>
+    document.body.classList.toggle("sidebar-open"));
+
   // ── websocket ──────────────────────────────────────────────────────
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -158,6 +163,7 @@
   }
 
   async function selectRoom(id) {
+    document.body.classList.remove("sidebar-open");
     state.currentRoomId = id;
     renderRoomList();
     switchView("chat");
@@ -476,6 +482,7 @@
     ev.preventDefault();
     const input = $("#composerInput");
     const content = input.value.trim();
+    document.body.classList.remove("sidebar-open"); // hide keyboard-friendly drawer
     if (!content || !state.currentRoomId) return;
     input.value = "";
     try {

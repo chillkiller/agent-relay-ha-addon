@@ -2,7 +2,7 @@
 # Multi-stage build: prebuilt Go binary (cross-compiled, CGO off) + SPA.
 # The Supervisor builds this on the device via buildx (no Go toolchain needed).
 name: Agent Relay
-version: "0.1.0"
+version: "0.1.1"
 slug: agent_relay
 description: Multi-Agent-Relay für die HA-Sidebar — buzz-artige Multi-Agent-Chats mit Paperclip-artiger Projektverwaltung
 url: https://github.com/GaRoN/agent-desktop-ha-app
@@ -19,6 +19,15 @@ ingress_port: 8099
 ingress_stream: true
 panel_title: Agent Relay
 panel_icon: mdi:account-multiple-outline
+
+# Externer LAN-Zugangspunkt („Open Web UI"-Button + Smartphone-Tab):
+# same app, full window instead of the ingress frame. Can be switched off
+# in the add-on's Network settings; the ingress stays usable regardless.
+ports:
+  "8099/tcp": 8099
+ports_description:
+  "8099/tcp": Direkter Zugang zur Relay-UI (volles Fenster, kein Ingress)
+webui: "http://[HOST]:[PORT:8099]/"
 
 # Supervisor watchdog probes the app's own health endpoint (Go serves it).
 watchdog: "http://[HOST]:8099/api/health"

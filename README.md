@@ -55,6 +55,17 @@ fcntl-Locks — niemals auf SMB/NFS-Mounts betreiben).
    `dist/agentrelay-amd64` und `dist/agentrelay-arm64`).
 3. App starten → Sidebar-Panel **„Agent Relay"** öffnen.
 
+### Zugangspunkte
+
+- **Ingress** (Standard): Sidebar-Panel „Agent Relay" — läuft auch remote über
+  die Companion-App/Nabu Casa, da der Traffic durch Home Assistant geht.
+  Achtung Smartphones: die UI schaltet unter 760 px auf einen Drawer (☰) um.
+- **Direkter LAN-Zugangspunkt**: die App mappet Port 8099 auf den HA-Host
+  (`ports: 8099/tcp`) und liefert dafür den **Open Web UI**-Button auf der
+  Add-on-Karte → volles Browserfenster (gut fürs Handy: `http://<ha-host>:8099`).
+  Der Port lässt sich in den Netzwerk-Einstellungen der App deaktivieren.
+  Bewusst LAN-only (kein Auth im v1) — für extern bitte den Ingress-Weg nehmen.
+
 ### Add-on-Optionen
 
 | Option | Standard | Zweck |
