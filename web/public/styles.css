@@ -134,27 +134,12 @@ body {
 .room-item .badge { transition: opacity .12s; }
 .room-item:hover .badge { opacity: 0; } /* Actions ersetzen das Badge beim Hover (wie Control-UI) */
 
-/* Hover-Marquee für lange Raum-Namen (echte Mechanik aus components.css) */
+/* Namensüberlauf: text-overflow ellipsis (Control-UI-Muster, kein JS-Timing):
+   das Affordance ist der … ohne Mask/Shift-Mechanik */
 .marquee {
-  --marquee-fade: 12px;
-  overflow: hidden; text-overflow: clip; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; flex: 1;
 }
-.marquee__text {
-  display: inline-block; width: max-content;
-  transition: transform 180ms ease-out;
-}
-/* B3 Muse: Fade-Affordance auch im Ruhezustand (DNA Sidebar-Formel);
-   Scroll-Transform bleibt hover-only */
-.marquee--overflowing {
-  mask-image: linear-gradient(to right, black calc(100% - var(--marquee-fade)), transparent);
-}
-.room-item:hover .marquee--overflowing {
-  mask-image: linear-gradient(to right, transparent, black var(--marquee-fade), black calc(100% - var(--marquee-fade)), transparent);
-}
-.room-item:hover .marquee--scrolling > .marquee__text {
-  transform: translateX(var(--marquee-shift, 0));
-}
-
 
 /* Roster */
 .roster { border-top: 1px solid var(--line); padding: var(--sp-3); }

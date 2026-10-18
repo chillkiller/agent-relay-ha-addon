@@ -205,26 +205,6 @@
           if (!state.currentRoomId && state.rooms.length) selectRoom(state.rooms[0].id);
         }
       }));
-    // marquee: Messung NACH Font-Load (Befund R5V-B3: static-Mask fehlte, weil
-    // die offsetWidth-Messung vor dem Font-Load lief und 0 ergab)
-    const measure = () => {
-      el.querySelectorAll(".room-item").forEach((row) => {
-        const mq = row.querySelector(".marquee");
-        const txt = row.querySelector(".marquee__text");
-        if (!mq || !txt) return;
-        const overflow = txt.offsetWidth - mq.offsetWidth;
-        if (overflow > 4) {
-          mq.classList.add("marquee--overflowing");
-          mq.style.setProperty("--marquee-shift", `${-(overflow + 8)}px`);
-        } else {
-          mq.classList.remove("marquee--overflowing");
-        }
-      });
-    };
-    if (document.fonts?.ready) {
-      document.fonts.ready.then(measure);
-    } else { measure(); }
-    measure();
     el.querySelectorAll("[data-room]").forEach((b) => {
       b.addEventListener("click", () => selectRoom(b.dataset.room));
       b.addEventListener("dragover", (ev) => { ev.preventDefault(); b.classList.add("dragover"); });
