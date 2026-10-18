@@ -73,7 +73,7 @@
   function handleEvent(e) {
     switch (e.type) {
       case "message.created": {
-        if (!state.currentRoomId || e.message.room_id !== state.currentRoomId) break;
+        if (!state.currentRoomId || e.message.roomId !== state.currentRoomId) break;
         state.messages[e.message.id] = e.message;
         renderMessages();
         break;
@@ -86,7 +86,7 @@
       }
       case "agent.started": {
         if (!e.message) break;
-        if (state.currentRoomId === e.message.room_id) {
+        if (state.currentRoomId === e.message.roomId) {
           state.messages[e.message.id] = e.message;
           streamBuf[e.message.id] = "";
           renderMessages();
@@ -100,8 +100,8 @@
           state.messages[e.message.id] = e.message;
           renderMessages();
         }
-        const t = typingTimers[e.message.agent_id];
-        if (t) { clearTimeout(t); delete typingTimers[e.message.agent_id]; renderTyping(); }
+        const t = typingTimers[e.message.agentId];
+        if (t) { clearTimeout(t); delete typingTimers[e.message.agentId]; renderTyping(); }
         break;
       }
       case "typing": {
@@ -189,8 +189,8 @@
   function renderMessages(force = false) {
     const wrap = $("#messages");
     const msgs = Object.values(state.messages)
-      .filter((m) => m.room_id === state.currentRoomId)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+      .filter((m) => m.roomId === state.currentRoomId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     stickBottom(wrap, force, () => {
       wrap.innerHTML = msgs.length ? msgs.map(msgHtml).join("") :
         `<div class="empty-state"><p>Noch keine Nachrichten in diesem Raum.</p></div>`;
@@ -205,16 +205,16 @@
   }
 
   function agentOf(m) {
-    return state.agents.find((a) => a.id === m.agent_id);
+    return state.agents.find((a) => a.id === m.agentId);
   }
 
   function msgHtml(m) {
-    const who = m.sender_kind === "human" ? "du" : m.sender_name;
-    const dot = m.agent_id && agentOf(m)
+    const who = m.senderKind === "human" ? "du" : m.senderName;
+    const dot = m.agentId && agentOf(m)
       ? `<span class="dot" style="background:${agentOf(m).color}"></span>` : "";
     return `
-      <div class="msg ${m.sender_kind} ${m.status} ${m.status === "error" ? "error" : ""}" data-mid="${m.id}">
-        <div class="meta">${dot}<strong>${esc(who)}</strong><span>${esc(fmtTime(m.created_at))}</span></div>
+      <div class="msg ${m.senderKind} ${m.status} ${m.status === "error" ? "error" : ""}" data-mid="${m.id}">
+        <div class="meta">${dot}<strong>${esc(who)}</strong><span>${esc(fmtTime(m.createdAt))}</span></div>
         <div class="content">${esc(m.status === "streaming" && streamBuf[m.id] !== undefined ? streamBuf[m.id] : m.content)}</div>
       </div>`;
   }
@@ -244,7 +244,7 @@
           <div class="sub">${esc(a.adapter)}${a.model ? " · " + esc(a.model) : ""}</div></div>
           <span class="chip" style="margin-left:auto;border-color:${esc(a.color)}">${a.enabled ? "aktiv" : "aus"}</span>
         </div>
-        <div class="sub">${esc((a.system_prompt || "").slice(0, 110))}${(a.system_prompt || "").length > 110 ? "…" : ""}</div>
+        <div class="sub">${esc((a.systemPrompt || "").slice(0, 110))}${(a.systemPrompt || "").length > 110 ? "…" : ""}</div>
         <div class="actions">
           <button class="btn" data-edit="${a.id}">Bearbeiten</button>
           <button class="btn danger" data-del="${a.id}">Löschen</button>
@@ -269,9 +269,9 @@
       { label: "Adapter", name: "adapter", type: "select", value: a?.adapter ?? "echo",
         options: state.adapters.map((x) => ({ value: x, label: x })) },
       { label: "Modell (z. B. openclaw/coordinator)", name: "model", type: "text", value: a?.model ?? "" },
-      { label: "Basis-URL (leer = globale Einstellung)", name: "baseUrl", type: "text", value: a?.base_url ?? "" },
-      { label: "API-Key (leer = globales Token)", name: "apiKey", type: "password", value: a?.api_key ?? "" },
-      { label: "System-Prompt", name: "systemPrompt", type: "textarea", value: a?.system_prompt ?? "" },
+      { label: "Basis-URL (leer = globale Einstellung)", name: "baseUrl", type: "text", value: a?.baseUrl ?? "" },
+      { label: "API-Key (leer = globales Token)", name: "apiKey", type: "password", value: a?.apiKey ?? "" },
+      { label: "System-Prompt", name: "systemPrompt", type: "textarea", value: a?.systemPrompt ?? "" },
       { label: "Aktiv", name: "enabled", type: "checkbox", checked: a ? !!a.enabled : true },
     ], async (form) => {
       const data = Object.fromEntries(new FormData(form).entries());
@@ -299,7 +299,7 @@
       return;
     }
     el.innerHTML = state.projects.map((p) => {
-      const tasks = state.tasks.filter((t) => t.project_id === p.id);
+      const tasks = state.tasks.filter((t) => t.projectId === p.id);
       return `
       <div class="project">
         <div class="p-head">
