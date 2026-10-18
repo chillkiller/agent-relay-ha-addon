@@ -140,6 +140,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/rooms/{id}", s.deleteRoom)
 	mux.HandleFunc("GET /api/rooms/{id}/messages", s.listMessages)
 	mux.HandleFunc("POST /api/rooms/{id}/messages", s.postMessage)
+	mux.HandleFunc("POST /api/rooms/reorder", s.reorderRooms)
 	mux.HandleFunc("POST /api/rooms/{id}/members", s.addMember)
 	mux.HandleFunc("DELETE /api/rooms/{id}/members/{agentId}", s.removeMember)
 

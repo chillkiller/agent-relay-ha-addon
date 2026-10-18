@@ -105,6 +105,21 @@ func (d *DB) DeleteAgent(id string) error {
 	return err
 }
 
+// ReorderRooms persists manual room order (drag&drop, review-7 B3).
+func (d *DB) ReorderRooms(ids []string) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	for i, id := range ids {
+		if _, err := tx.Exec(`UPDATE rooms SET position=?, updated_at=? WHERE id=?`, i, now(), id); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // ── projects ────────────────────────────────────────────────────────
 
 func (d *DB) ListProjects() ([]*Project, error) {
@@ -154,7 +169,7 @@ func (d *DB) DeleteProject(id string) error {
 // ── rooms ───────────────────────────────────────────────────────────
 
 func (d *DB) ListRooms() ([]*Room, error) {
-	rows, err := d.db.Query(`SELECT id,name,kind,human_member,project_id,created_at,updated_at FROM rooms ORDER BY created_at`)
+	rows, err := d.db.Query(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at FROM rooms ORDER BY position,created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -164,11 +179,12 @@ func (d *DB) ListRooms() ([]*Room, error) {
 	for rows.Next() {
 		r := &Room{}
 		var pid sql.NullString
-		var hm int
-		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pid, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var hm, pos int
+		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.HumanMember = hm == 1
+		r.Position = pos
 		if pid.Valid {
 			r.ProjectID = &pid.String
 		}
@@ -214,10 +230,11 @@ func (d *DB) ListRooms() ([]*Room, error) {
 func (d *DB) GetRoom(id string) (*Room, error) {
 	r := &Room{}
 	var pid sql.NullString
-	var hm int
-	err := d.db.QueryRow(`SELECT id,name,kind,human_member,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.Kind, &hm, &pid, &r.CreatedAt, &r.UpdatedAt)
+	var hm, pos int
+	err := d.db.QueryRow(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt)
 	r.HumanMember = hm == 1
+	r.Position = pos
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -260,8 +277,8 @@ func (d *DB) InsertRoom(r *Room) error {
 	if !r.HumanMember {
 		hm = 0
 	}
-	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`,
-		r.ID, r.Name, kind, hm, pid, r.CreatedAt, r.UpdatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,position,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+		r.ID, r.Name, kind, hm, r.Position, pid, r.CreatedAt, r.UpdatedAt); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -287,8 +304,8 @@ func (d *DB) UpdateRoom(r *Room) error {
 	if !r.HumanMember {
 		hm = 0
 	}
-	if _, err := tx.Exec(`UPDATE rooms SET name=?, kind=?, human_member=?, project_id=?, updated_at=? WHERE id=?`,
-		r.Name, r.Kind, hm, pid, now(), r.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE rooms SET name=?, kind=?, human_member=?, position=?, project_id=?, updated_at=? WHERE id=?`,
+		r.Name, r.Kind, hm, r.Position, pid, now(), r.ID); err != nil {
 		tx.Rollback()
 		return err
 	}

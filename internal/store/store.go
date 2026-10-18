@@ -49,6 +49,7 @@ type Room struct {
 	Name           string   `json:"name"`
 	Kind           string   `json:"kind"` // "chat" | "project" (project rooms carry the task board)
 	HumanMember    bool     `json:"humanMember"` // operator participation; false = room hidden from sidebar
+	Position       int      `json:"position"` // manual sort order (drag&drop, review-7 B3)
 	ProjectID      *string  `json:"projectId"` // legacy link; project-kind rooms are the room themselves
 	CreatedAt      string   `json:"createdAt"`
 	UpdatedAt      string   `json:"updatedAt"`
@@ -143,6 +144,12 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.human_member alter: %w", err)
 		}
 	}
+	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN position INTEGER NOT NULL DEFAULT 0`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("rooms.position alter: %w", err)
+		}
+	}
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -162,6 +169,7 @@ CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project')),
   human_member INTEGER NOT NULL DEFAULT 1,
+  position INTEGER NOT NULL DEFAULT 0,
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );

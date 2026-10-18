@@ -94,10 +94,22 @@ body {
 }
 
 .room-group {
-  display: flex; align-items: center; gap: 6px;
-  margin: 10px 6px 4px; font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  margin: 10px 6px 4px; padding: 3px 4px;
+  font-size: 11px; font-weight: 600;
   color: var(--ink-4); text-transform: uppercase; letter-spacing: .8px;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  border-radius: var(--r-xs);
 }
+.room-group:hover { color: var(--ink-2); background: var(--s2); }
+.room-group .chev {
+  display: inline-flex; flex: none; transition: transform .15s ease;
+  font-size: 10px; line-height: 1; color: var(--ink-3);   /* B1-fix: sichtbar (war 9px/ink-4) */
+  width: 14px; justify-content: center;
+}
+.room-group:hover .chev { color: var(--ink-2); }
+.room-group[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.room-group-body[data-collapsed="1"] { display: none; }
 .room-group .badge { margin-left: auto; }
 .room-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -111,7 +123,10 @@ body {
   margin-left: auto; font-size: 11px; color: var(--ink-4);
   background: var(--s3); border-radius: var(--r-pill); padding: 1px 7px; min-width: 18px; text-align: center;
 }
-.room-item.dragover { box-shadow: inset 0 0 0 1px var(--accent-hover); background: var(--s3); color: var(--ink); }
+.room-item.dragover { background: var(--s3); color: var(--ink); }
+/* B3: Drop-Zonen zwischen Rows (Control-UI: drop-before/after, accent line) */
+.room-item.drop-before { box-shadow: inset 0 2px 0 var(--accent-hover); }
+.room-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent-hover); }
 
 /* Row-Actions erscheinen auf Hover (Control-UI-Muster: session-action) */
 .room-item { position: relative; }
@@ -141,23 +156,37 @@ body {
   min-width: 0; flex: 1;
 }
 
-/* Roster */
-.roster { border-top: 1px solid var(--line); padding: var(--sp-3); }
+/* Team (B2: Sidebar-Sektion mit Facepile + Presence, Control-UI-Muster) */
+.roster { border-top: 1px solid var(--line); padding: var(--sp-2) var(--sp-2) var(--sp-3); }
 .roster-title {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 3px 6px; margin-bottom: var(--sp-2);
   font-size: 11px; font-weight: 600; color: var(--ink-4);
-  text-transform: uppercase; letter-spacing: .8px; margin-bottom: var(--sp-2);
+  text-transform: uppercase; letter-spacing: .8px;
 }
 .roster-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .roster-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 3px 10px 3px 4px; border-radius: var(--r-pill);
   background: var(--s2); border: 1px solid var(--line);
   color: var(--ink-2); font-size: 12.5px; font-weight: 500;
   cursor: grab; user-select: none; max-width: 100%;
 }
 .roster-chip:hover { border-color: var(--line-2); background: var(--s3); }
 .roster-chip.dragover { box-shadow: 0 0 0 1px var(--accent-hover); }
-.roster-chip .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* B2: 20px-Avatar + Presence-Dot (Control-UI sidebar-online__person) */
+.roster-chip .avatar {
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #fff; position: relative;
+}
+.roster-chip .avatar::after {
+  content: ""; position: absolute; right: 0; bottom: 0;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 0 2px var(--s1);
+}
+.roster-chip.idle .avatar::after { background: var(--warn); }
+.roster-chip.unknown .avatar::after { background: none; border: 1.5px solid var(--line-3); }
 .roster-add {
   margin-top: var(--sp-2); width: 100%; padding: 6px;
   border: 1px dashed var(--line-2); border-radius: var(--r-md);
@@ -166,9 +195,25 @@ body {
 .roster-add:hover { color: var(--ink); border-color: var(--ink-4); }
 
 .side-foot {
-  display: flex; align-items: center; gap: 8px;
-  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line);
-  color: var(--ink-4); font-size: 12px;
+  padding: var(--sp-3) var(--sp-2); border-top: 1px solid var(--line);
+}
+/* B4: Identity-Card (Control-UI sidebar-footer-bar-Muster) */
+.identity {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: var(--r-lg);
+  background: var(--s2); border: 1px solid var(--line);
+}
+.identity:hover { border-color: var(--line-2); }
+.identity .avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 650; color: #fff;
+}
+.identity-name { font-size: 13px; font-weight: 650; color: var(--ink); letter-spacing: -0.1px; }
+.identity-sub { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-4); }
+.identity .mini-cta {
+  margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .mini-cta {
   margin-left: auto; border: 1px solid var(--line-2); border-radius: var(--r-md);

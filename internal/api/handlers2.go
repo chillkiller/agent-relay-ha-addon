@@ -373,6 +373,24 @@ func env(key, def string) string {
 	return def
 }
 
+
+func (s *Server) reorderRooms(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if err := decode(r, &body); err != nil || len(body.Order) == 0 {
+		errJSON(w, 400, "order (Array von room-ids) erforderlich")
+		return
+	}
+	if err := s.st.ReorderRooms(body.Order); err != nil {
+		log.Printf("[api] reorder failed: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	roomChanged(s)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 // ── handlers: tasks ─────────────────────────────────────────────────
 
 type taskBody struct {

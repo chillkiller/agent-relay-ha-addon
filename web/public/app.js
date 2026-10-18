@@ -186,10 +186,31 @@
         </span>
         ${r.messageCount ? `<span class="badge">${r.messageCount}</span>` : ""}
       </button>`;
-    const group = (label, rooms) => rooms.length
-      ? `<div class="room-group">${label}<span class="badge">${rooms.length}</span></div>${rooms.map(item).join("")}`
-      : "";
+    const groupId = (label) => label.toLowerCase().replace(/[^a-z]/g, "");
+    const group = (label, rooms) => {
+      if (!rooms.length) return "";
+      const gid = groupId(label);
+      const collapsed = localStorage.getItem(`sidebar:collapsed:${gid}`) === "1";
+      return `
+        <button class="room-group" data-group-toggle="${gid}" aria-expanded="${collapsed ? "false" : "true"}">
+          <span class="chev">▸</span>${label}<span class="badge">${rooms.length}</span>
+        </button>
+        <div class="room-group-body" data-group-body="${gid}" data-collapsed="${collapsed ? "1" : "0"}">
+          ${rooms.map(item).join("")}
+        </div>`;
+    };
     el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+
+    // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)
+    el.querySelectorAll("[data-group-toggle]").forEach((t) =>
+      t.addEventListener("click", () => {
+        const gid = t.dataset.groupToggle;
+        const body = el.querySelector(`[data-group-body="${gid}"]`);
+        const nowCollapsed = body.dataset.collapsed !== "1";
+        body.dataset.collapsed = nowCollapsed ? "1" : "0";
+        t.setAttribute("aria-expanded", nowCollapsed ? "false" : "true");
+        localStorage.setItem(`sidebar:collapsed:${gid}`, nowCollapsed ? "1" : "0");
+      }));
 
     el.querySelectorAll("[data-act]").forEach((a) =>
       a.addEventListener("click", async (ev) => {
@@ -207,7 +228,21 @@
         }
       }));
     el.querySelectorAll("[data-room]").forEach((b) => {
-      b.addEventListener("click", () => selectRoom(b.dataset.room));
+      b.dataset.draggable = "true";
+      b.setAttribute("draggable", "true");
+      b.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/room-id", b.dataset.room);
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      b.addEventListener("dragover", (ev2) => {
+        if (!ev2.dataTransfer.types.includes("text/room-id")) return;
+        ev2.preventDefault();
+        const r = b.getBoundingClientRect();
+        const before = (ev2.clientY - r.top) < r.height / 2;
+        b.classList.toggle("drop-before", before);
+        b.classList.toggle("drop-after", !before);
+      });
+      b.addEventListener("drop", (ev2) => { handleRoomReorderDrop(ev2, b); });
       b.addEventListener("dragover", (ev) => { ev.preventDefault(); b.classList.add("dragover"); });
       b.addEventListener("dragleave", () => b.classList.remove("dragover"));
       b.addEventListener("drop", async (ev) => {
@@ -236,6 +271,21 @@
         } catch (err) { toast(err.message); }
       });
     });
+  }
+
+  function handleRoomReorderDrop(ev, targetRow) {
+    const dragged = ev.dataTransfer.getData("text/room-id");
+    if (!dragged || dragged === targetRow.dataset.room) { targetRow.classList.remove("drop-before", "drop-after"); return; }
+    ev.preventDefault(); ev.stopPropagation();
+    targetRow.classList.remove("drop-before", "drop-after");
+    const ids = state.rooms.map((r) => r.id);
+    ids.splice(ids.indexOf(dragged), 1);
+    let ti = ids.indexOf(targetRow.dataset.room);
+    if (targetRow.classList.contains("drop-after")) ti += 1;
+    ids.splice(ti, 0, dragged);
+    api("POST", "/api/rooms/reorder", { order: ids })
+      .then(() => loadRooms())
+      .catch((err) => toast(err.message));
   }
 
   async function selectRoom(id) {
@@ -436,10 +486,11 @@
     const list = $("#rosterList");
     if (!list) return;
     list.innerHTML = [
-      `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du) oder hierher zurück = Raum verlassen"><span class="swatch" style="background:var(--ok)"></span>du</span>`,
+      `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du) oder hierher zurück = Raum verlassen">
+        <span class="avatar" style="background:var(--ok)">G</span>du</span>`,
       ...state.agents.map((a) => `
-        <span class="roster-chip" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen">
-          <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} ${esc(a.name)}
+        <span class="roster-chip ${a.enabled ? "" : "idle"}" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen (${a.enabled ? "online" : "aus"})">
+          <span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}
         </span>`),
     ].join("");
     list.querySelectorAll('[draggable="true"]').forEach((chip) => {
