@@ -198,8 +198,24 @@ body {
 }
 .roster-add:hover { color: var(--ink); border-color: var(--ink-4); }
 
+.nav-group { margin-bottom: 2px; }
+.nav-group-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 6px; margin: 2px 0;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  font-size: 11px; font-weight: 600; color: var(--ink-4);
+  text-transform: uppercase; letter-spacing: .8px;
+  border-radius: var(--r-xs);
+}
+.nav-group-head:hover { color: var(--ink-2); background: var(--s2); }
+.nav-group-head .chev { font-size: 10px; color: var(--ink-3); width: 14px; text-align: center; transition: transform .15s; display: inline-flex; justify-content: center; }
+.nav-group[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.nav-group-body { display: flex; flex-direction: column; gap: 1px; }
+.nav-group[aria-expanded="false"] .nav-group-body { display: none; }
+
 .side-foot {
   padding: var(--sp-3) var(--sp-2); border-top: 1px solid var(--line);
+  position: relative;
 }
 /* B4: Identity-Card (Control-UI sidebar-footer-bar-Muster) */
 .identity {
@@ -208,6 +224,20 @@ body {
   background: var(--s2); border: 1px solid var(--line);
 }
 .identity:hover { border-color: var(--line-2); }
+.identity { cursor: pointer; }
+.identity:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-tint); border-color: var(--accent); }
+.user-menu {
+  position: absolute; bottom: calc(100% + 6px); left: var(--sp-2); right: var(--sp-2);
+  background: var(--s3); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg); padding: 4px; z-index: 20;
+}
+.user-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: none; color: var(--ink-2); text-align: left;
+  padding: 7px 10px; border-radius: var(--r-md); cursor: pointer; font: inherit; font-size: 13px;
+}
+.user-menu button:hover { background: var(--s4); color: var(--ink); }
+.user-menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
 .identity .avatar {
   width: 28px; height: 28px; border-radius: 50%; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
@@ -349,22 +379,19 @@ body {
 }
 .mention-pop button:hover, .mention-pop button.sel { background: var(--s4); color: var(--ink); }
 
-/* Composer */
+/* Composer — schwebende Karte am Fuß (Control-UI: superellipse + float, kein abgetrennter Balken) */
 .composer {
-  /* B1 Muse R8: schwebende Karte (verankert am Fuß), kein abgetrennter Balken */
   display: flex; align-items: flex-end; gap: var(--sp-2);
   padding: var(--sp-3);
   background: var(--s2); border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
-  max-width: 948px; margin: 0 var(--sp-4) var(--sp-4) auto; /* float card, rechtsbündig im Thread-Fluss */
-  width: calc(100% - var(--sp-6) - 16px);
-  position: relative;
+  max-width: 948px; margin: auto var(--sp-3) var(--sp-3) auto;
+  width: calc(100% - var(--sp-6) - 12px);
+  position: sticky; bottom: var(--sp-3);
 }
-@supports (corner-shape: superellipse(1.5)) {
-  .composer { corner-shape: superellipse(1.5); }
-}
-.messages { gap: var(--sp-2); padding-bottom: var(--sp-5); } /* dichterer Thread (8px) */
+@supports (corner-shape: superellipse(1.5)) { .composer { corner-shape: superellipse(1.5); } }
+.messages { gap: var(--sp-2); padding-bottom: var(--sp-2); }
 .composer textarea {
   flex: 1; resize: none; max-height: 160px;
   background: var(--canvas); border: 1px solid var(--line);
@@ -373,7 +400,7 @@ body {
   transition: border-color .12s;
 }
 .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-tint); }
-.composer textarea::placeholder { color: var(--ink-4); }
+.composer textarea::placeholder { color: var(--ink-3); }
 .composer button {
   flex: none; width: 38px; height: 38px;
   border: 0; border-radius: var(--r-lg); cursor: pointer;
@@ -381,7 +408,7 @@ body {
   transition: background .12s, opacity .12s;
 }
 .composer button:hover { background: var(--accent-hover); }
-.composer button:disabled { opacity: .35; cursor: default; background: var(--s3); color: var(--ink-4); }
+.composer button:disabled { opacity: .85; cursor: default; background: var(--s3); color: var(--ink-4); }
 
 /* ═══════════ Agents ═══════════ */
 .view-head {

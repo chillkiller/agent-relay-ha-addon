@@ -159,6 +159,23 @@
     document.body.classList.remove("sidebar-open");
   }
 
+   // Sidebar v2: einklappbare Gruppen oben + User-Dropdown unten
+  function toggleSidebarGroup(gid) {
+    const g = document.querySelector(`[data-group="${gid}"]`);
+    if (!g) return;
+    const collapsed = g.getAttribute("aria-expanded") === "false";
+    const nowCollapsed = !collapsed;
+    g.setAttribute("aria-expanded", nowCollapsed ? "false" : "true");
+    const head = g.querySelector("[data-group-toggle]");
+    if (head) head.querySelector(".chev").textContent = nowCollapsed ? "▸" : "▾";
+    localStorage.setItem(`sidebar:collapsed:${gid}`, nowCollapsed ? "1" : "0");
+  }
+  function bindSidebarGroups(root) {
+    root.querySelectorAll("[data-group-toggle]").forEach((btn) => {
+      btn.addEventListener("click", () => toggleSidebarGroup(btn.dataset.groupToggle));
+    });
+  }
+
   // ═════════════════════════════════════════════════════════════════
   // Räume (gruppiert: RÄUME / PROJEKTE) + Drag&Drop-Ziele
   // ═════════════════════════════════════════════════════════════════
@@ -168,7 +185,9 @@
   }
 
   function renderRoomList() {
-    const el = $("#roomList");
+    const mount = $("#navGroups");
+    const el = mount || $("#roomList");
+    if (!el) return;
     const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat" && r.humanMember !== false);
     const projs = state.rooms.filter((r) => r.kind === "project" && r.humanMember !== false);
     const ghost = state.rooms.filter((r) => r.humanMember === false);
@@ -199,7 +218,40 @@
           ${rooms.map(item).join("")}
         </div>`;
     };
-    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+    // Sidebar v2: navGroups als einklappbare Menüs oben
+    if (mount) {
+      const isCollapsed = (gid) => localStorage.getItem(`sidebar:collapsed:${gid}`) === "1";
+      const teamHtml = (() => {
+        const gid = "team"; const collapsed = isCollapsed(gid);
+        const chips = [
+          `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du)"><span class="avatar" style="background:var(--ok)">G</span>du<span class="presence"></span></span>`,
+          ...state.agents.map((a) => `<span class="roster-chip ${a.enabled ? "" : "idle"}" draggable="true" data-agent="${a.id}"><span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence"></span></span>`),
+        ].join("");
+        return `<div class="nav-group" data-group="${gid}" aria-expanded="${collapsed ? "false" : "true"}">
+          <button class="nav-group-head" data-group-toggle="${gid}"><span class="chev">${collapsed ? "▸" : "▾"}</span>Team <span class="badge" style="margin-left:auto;font-size:11px;color:var(--ink-4)">${state.agents.length + 1}</span></button>
+          <div class="nav-group-body"><div class="roster-list" id="rosterList">${chips}</div><button id="newAgentQuick" class="roster-add" style="margin-top:8px">＋ Agent</button></div>
+        </div>`;
+      })();
+      const navGroup = (label, gid, inner) => {
+        if (!inner) return "";
+        const collapsed = isCollapsed(gid);
+        return `<div class="nav-group" data-group="${gid}" aria-expanded="${collapsed ? "false" : "true"}">
+          <button class="nav-group-head" data-group-toggle="${gid}"><span class="chev">${collapsed ? "▸" : "▾"}</span>${label}</button>
+          <div class="nav-group-body">${inner}</div>
+        </div>`;
+      };
+      const roomGroupsHtml = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+      // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
+      mount.innerHTML = roomGroupsHtml + teamHtml;
+      bindSidebarGroups(mount);
+      // Quick-Nav Gruppe ebenfalls binden
+      bindSidebarGroups(document.getElementById("quickNavGroups") || document);
+      // Team-Drag binden
+      bindRosterDrag(mount);
+      const qa = mount.querySelector("#newAgentQuick"); if (qa) qa.addEventListener("click", () => agentModal());
+    } else {
+      el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+    }
 
     // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)
     el.querySelectorAll("[data-group-toggle]").forEach((t) =>
@@ -478,6 +530,15 @@
     hideMention(); autoGrow(); input.focus();
   }
   function hideMention() { $("#mentionPop").hidden = true; }
+
+  function bindRosterDrag(root) {
+    (root || document).querySelectorAll('[draggable="true"][data-agent]').forEach((chip) => {
+      chip.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/agent-id", chip.dataset.agent);
+        ev.dataTransfer.effectAllowed = "copyMove";
+      });
+    });
+  }
 
   // ═════════════════════════════════════════════════════════════════
   // Roster (Team) — Drag-Quellen / Rückgabe-Ziele
@@ -875,7 +936,36 @@
   $("#burger").addEventListener("click", () =>
     document.body.classList.toggle("sidebar-open"));
 
-  $("#newRoomBtn").addEventListener("click", () => {
+  // User-Dropdown unten (Identity-Card)
+  (() => {
+    const card = $("#identityCard"), menu = $("#userMenu");
+    if (!card || !menu) return;
+    const close = () => { menu.hidden = true; card.setAttribute("aria-expanded", "false"); };
+    card.addEventListener("click", (e) => { e.stopPropagation(); const open = menu.hidden; if (open) { menu.hidden = false; card.setAttribute("aria-expanded", "true"); } else close(); });
+    menu.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => { close(); switchView(b.dataset.view); }));
+    menu.querySelectorAll("[data-user-act]").forEach((b) => b.addEventListener("click", () => {
+      close();
+      if (b.dataset.userAct === "newRoom") document.getElementById("newRoomBtn")?.click() || openNewRoom();
+      if (b.dataset.userAct === "newAgent") agentModal();
+    }));
+    document.addEventListener("click", (ev) => { if (!menu.hidden && !card.contains(ev.target) && !menu.contains(ev.target)) close(); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+  })();
+  function openNewRoom() {
+    openModal("Neuer Raum", [
+      { label: "Raumname", name: "name", type: "text", required: true },
+      { label: "Typ", name: "kind", type: "select", value: "chat", options: [{ value: "chat", label: "💬 Chat-Raum" },{ value: "project", label: "🗂 Projekt-Raum (Chat + Board)" }]},
+      { label: "Agents im Raum (später auch per Drag&Drop)", name: "agentIds", type: "select", options: [] },
+    ], async (form) => {
+      const data = { name: form.name.value, kind: form.kind.value };
+      data.agentIds = [...form.agentIds.selectedOptions].map((o) => o.value);
+      const room = await api("POST", "/api/rooms", data);
+      await loadRooms(); await loadAgents(); selectRoom(room.id); return true;
+    });
+    const sel = $("#modal [name=agentIds]"); sel.setAttribute("multiple","multiple"); sel.size = Math.min(6, Math.max(3, state.agents.length)); sel.innerHTML = state.agents.map((a) => `<option value="${a.id}">${esc(a.emoji)} ${esc(a.name)}</option>`).join("");
+  }
+  $("#newRoomBtn")?.addEventListener("click", () => openNewRoom());
+  $("#newRoomBtnLegacy")?.addEventListener("click", () => {
     openModal("Neuer Raum", [
       { label: "Raumname", name: "name", type: "text", required: true },
       { label: "Typ", name: "kind", type: "select", value: "chat", options: [
@@ -899,7 +989,7 @@
   });
 
   $("#newAgentBtn").addEventListener("click", () => agentModal());
-  $("#newAgentQuick").addEventListener("click", () => agentModal());
+  document.getElementById("newAgentQuick")?.addEventListener("click", () => agentModal());
   $("#newProjectBtn").addEventListener("click", () => newProjectModal());
 
   document.querySelectorAll(".nav-btn").forEach((b) =>
