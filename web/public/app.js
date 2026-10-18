@@ -169,8 +169,9 @@
 
   function renderRoomList() {
     const el = $("#roomList");
-    const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat");
-    const projs = state.rooms.filter((r) => r.kind === "project");
+    const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat" && r.humanMember !== false);
+    const projs = state.rooms.filter((r) => r.kind === "project" && r.humanMember !== false);
+    const ghost = state.rooms.filter((r) => r.humanMember === false);
     const item = (r) => `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
               data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
@@ -188,7 +189,7 @@
     const group = (label, rooms) => rooms.length
       ? `<div class="room-group">${label}<span class="badge">${rooms.length}</span></div>${rooms.map(item).join("")}`
       : "";
-    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs);
+    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
 
     el.querySelectorAll("[data-act]").forEach((a) =>
       a.addEventListener("click", async (ev) => {
@@ -212,7 +213,15 @@
       b.addEventListener("drop", async (ev) => {
         ev.preventDefault(); b.classList.remove("dragover");
         const agentId = ev.dataTransfer.getData("text/agent-id");
-        if (!agentId || agentId === HUMAN) return;
+        if (!agentId) return;
+        if (agentId === HUMAN) {
+          try {
+            await api("PATCH", `/api/rooms/${b.dataset.room}`, { humanMember: true });
+            await loadRooms();
+            selectRoom(b.dataset.room);
+          } catch (err) { toast(err.message); }
+          return;
+        }
         try {
           if (b.dataset.kind === "project") {
             // in Projekt-Raum: einladen = Roster-Erweiterung (PATCH agentIds)
@@ -427,7 +436,7 @@
     const list = $("#rosterList");
     if (!list) return;
     list.innerHTML = [
-      `<span class="roster-chip" data-agent="${HUMAN}" draggable="false"><span class="swatch" style="background:var(--ok)"></span>du</span>`,
+      `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du) oder hierher zurück = Raum verlassen"><span class="swatch" style="background:var(--ok)"></span>du</span>`,
       ...state.agents.map((a) => `
         <span class="roster-chip" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen">
           <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} ${esc(a.name)}
@@ -443,10 +452,18 @@
       chip.addEventListener("drop", async (ev) => {
         ev.preventDefault(); chip.classList.remove("dragover");
         const agentId = ev.dataTransfer.getData("text/agent-id");
-        if (!agentId || agentId === HUMAN || agentId === chip.dataset.agent || !state.currentRoomId) return;
+        if (!agentId || agentId === chip.dataset.agent || !state.currentRoomId) return;
         try {
-          await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${agentId}`);
-          await loadRooms(); await selectRoom(state.currentRoomId);
+          if (agentId === HUMAN) {
+            await api("PATCH", `/api/rooms/${state.currentRoomId}`, { humanMember: false });
+            state.currentRoomId = null;
+            $("#activeRoomName").textContent = "Kein Raum gewählt";
+            $("#memberChips").innerHTML = "";
+          } else {
+            await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${agentId}`);
+            await selectRoom(state.currentRoomId);
+          }
+          await loadRooms();
         } catch (err) { toast(err.message); }
       });
     });

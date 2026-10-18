@@ -154,7 +154,7 @@ func (d *DB) DeleteProject(id string) error {
 // ── rooms ───────────────────────────────────────────────────────────
 
 func (d *DB) ListRooms() ([]*Room, error) {
-	rows, err := d.db.Query(`SELECT id,name,kind,project_id,created_at,updated_at FROM rooms ORDER BY created_at`)
+	rows, err := d.db.Query(`SELECT id,name,kind,human_member,project_id,created_at,updated_at FROM rooms ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -164,9 +164,11 @@ func (d *DB) ListRooms() ([]*Room, error) {
 	for rows.Next() {
 		r := &Room{}
 		var pid sql.NullString
-		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &pid, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var hm int
+		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pid, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
+		r.HumanMember = hm == 1
 		if pid.Valid {
 			r.ProjectID = &pid.String
 		}
@@ -212,8 +214,10 @@ func (d *DB) ListRooms() ([]*Room, error) {
 func (d *DB) GetRoom(id string) (*Room, error) {
 	r := &Room{}
 	var pid sql.NullString
-	err := d.db.QueryRow(`SELECT id,name,kind,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.Kind, &pid, &r.CreatedAt, &r.UpdatedAt)
+	var hm int
+	err := d.db.QueryRow(`SELECT id,name,kind,human_member,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.Kind, &hm, &pid, &r.CreatedAt, &r.UpdatedAt)
+	r.HumanMember = hm == 1
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -252,8 +256,12 @@ func (d *DB) InsertRoom(r *Room) error {
 	if kind == "" {
 		kind = "chat"
 	}
-	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?)`,
-		r.ID, r.Name, kind, pid, r.CreatedAt, r.UpdatedAt); err != nil {
+	hm := 1
+	if !r.HumanMember {
+		hm = 0
+	}
+	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`,
+		r.ID, r.Name, kind, hm, pid, r.CreatedAt, r.UpdatedAt); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -275,8 +283,12 @@ func (d *DB) UpdateRoom(r *Room) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE rooms SET name=?, project_id=?, updated_at=? WHERE id=?`,
-		r.Name, pid, now(), r.ID); err != nil {
+	hm := 1
+	if !r.HumanMember {
+		hm = 0
+	}
+	if _, err := tx.Exec(`UPDATE rooms SET name=?, kind=?, human_member=?, project_id=?, updated_at=? WHERE id=?`,
+		r.Name, r.Kind, hm, pid, now(), r.ID); err != nil {
 		tx.Rollback()
 		return err
 	}

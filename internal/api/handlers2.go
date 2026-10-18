@@ -116,6 +116,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 type roomBody struct {
 	Name      string   `json:"name"`
 	Kind      string   `json:"kind"` // chat | project
+	HumanMember *bool  `json:"humanMember"` // operator in/out
 	ProjectID *string  `json:"projectId"`
 	AgentIDs  []string `json:"agentIds"`
 	// member endpoints:
@@ -169,6 +170,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		ID:             newIDs("room"),
 		Name:           b.Name,
 		Kind:           b.Kind,
+		HumanMember:    b.HumanMember == nil || *b.HumanMember,
 		ProjectID:      b.ProjectID,
 		MemberAgentIDs: b.AgentIDs,
 		CreatedAt:      nowISO(),
@@ -232,6 +234,9 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	if fieldPresent(raw, "projectId") {
 		room.ProjectID = b.ProjectID
+	}
+	if fieldPresent(raw, "humanMember") && b.HumanMember != nil {
+		room.HumanMember = *b.HumanMember // owner in/out (du-drag)
 	}
 	// roster replacement on PATCH (review-2 M-1): explicit agentIds wins,
 	// otherwise the loaded roster is preserved
