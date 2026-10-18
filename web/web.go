@@ -21,7 +21,8 @@ func SPA(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := strings.TrimPrefix(r.URL.Path, "/")
-		if clean != "" && !strings.HasSuffix(clean, "/") {
+		// traversal defense: no "..", no absolute-ness, no backslashes
+		if clean != "" && !strings.Contains(clean, "..") && !strings.Contains(clean, "\\") && !strings.HasSuffix(clean, "/") {
 			if data, err := fs.ReadFile(sub, clean); err == nil {
 				w.Header().Set("Content-Type", contentType(clean))
 				_, _ = w.Write(data)

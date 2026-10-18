@@ -237,7 +237,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 	out := s.st.GetSettings()
 	// write-only token: never return the stored secret (review C-2)
 	if tok, ok := out["openclawToken"].(string); ok && tok != "" {
-		out["openclawToken"] = "***"
+		out["openclawToken"] = "##MASK##"
 	} else {
 		out["openclawToken"] = ""
 	}
@@ -252,7 +252,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, v := range body {
 		if _, ok := map[string]bool{"relayName": true, "theme": true, "openclawBaseUrl": true, "openclawToken": true}[k]; ok {
-			if k == "openclawToken" && (v == "***" || strings.TrimSpace(v) == "") {
+			if k == "openclawToken" && (v == "##MASK##" || strings.TrimSpace(v) == "") {
 				continue // placeholder or cleared field never overwrites the secret
 			}
 			if err := s.st.UpdateSetting(k, v); err != nil {
@@ -261,7 +261,14 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, 200, s.st.GetSettings())
+	out := s.st.GetSettings()
+	// never echo the secret back on PATCH either (review-2 copilot H-1)
+	if tok, ok := out["openclawToken"].(string); ok && tok != "" {
+		out["openclawToken"] = "##MASK##"
+	} else {
+		out["openclawToken"] = ""
+	}
+	writeJSON(w, 200, out)
 }
 
 // ── handlers: agents ────────────────────────────────────────────────
@@ -349,6 +356,11 @@ func (s *Server) patchAgent(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 404, "Agent nicht gefunden")
 		return
 	}
+	raw, rerr := readRawBody(r)
+	if rerr != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
 	var b agentBody
 	if err := decode(r, &b); err != nil {
 		errJSON(w, 400, "ungültiges JSON")
@@ -369,13 +381,13 @@ func (s *Server) patchAgent(w http.ResponseWriter, r *http.Request) {
 	if b.Adapter != "" {
 		existing.Adapter = b.Adapter
 	}
-	if b.Model != "" || hasJSON(r, "model") {
+	if fieldPresent(raw, "model") {
 		existing.Model = b.Model
 	}
-	if b.BaseURL != "" || hasJSON(r, "baseUrl") {
+	if fieldPresent(raw, "baseUrl") {
 		existing.BaseURL = b.BaseURL
 	}
-	if b.APIKey != "" || hasJSON(r, "apiKey") {
+	if fieldPresent(raw, "apiKey") {
 		existing.APIKey = b.APIKey
 	}
 	if b.Enabled != nil {
@@ -404,19 +416,31 @@ func fallback(v, def string) string {
 	return v
 }
 
-// hasJSON inspects the raw body for a key (cheap presence check).
-func hasJSON(r *http.Request, key string) bool {
+// fieldPresent reports whether the request body contains a key. Requires
+// readRawBody (below) to have loaded the body — decode()-based handlers call
+// it via bodyFields (review-2 copilot H-3: hasJSON alone is dead code —
+// decode() consumes the body first).
+func fieldPresent(raw map[string]json.RawMessage, key string) bool {
+	_, ok := raw[key]
+	return ok
+}
+
+// readRawBody reads the request body ONCE into a map and restores a
+// replacement reader, so a later decode() still works.
+func readRawBody(r *http.Request) (map[string]json.RawMessage, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		return false
+		return nil, err
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
+	if len(bytes.TrimSpace(body)) == 0 {
+		return map[string]json.RawMessage{}, nil
+	}
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
-		return false
+		return nil, err
 	}
-	_, ok := m[key]
-	return ok
+	return m, nil
 }
 
 // ── ... continuation in next file ───────────────────────────────────

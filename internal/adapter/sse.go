@@ -21,8 +21,8 @@ func buildRequestBody(a AgentConfig, model string, history []Message) io.Reader 
 	}
 	for _, m := range history {
 		content := m.Content
-		if m.Role == "assistant" && a.Name != "" && m.Name == a.Name {
-			continue // skip the agent's own previous messages when running
+		if m.Role == "assistant" && a.ID != "" && m.AgentID == a.ID {
+			continue // stable id match (review-2 M-2), never display names
 		}
 		msgs = append(msgs, message{Role: m.Role, Content: content})
 	}

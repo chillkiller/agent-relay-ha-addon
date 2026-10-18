@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
+	"strconv"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,7 +26,8 @@ type projectBody struct {
 func (s *Server) listProjects(w http.ResponseWriter, _ *http.Request) {
 	projects, err := s.st.ListProjects()
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if projects == nil {
@@ -52,7 +55,8 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   nowISO(),
 	}
 	if err := s.st.InsertProject(p); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	writeJSON(w, 201, p)
@@ -62,11 +66,17 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p, err := s.st.GetProject(id)
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if p == nil {
 		errJSON(w, 404, "Projekt nicht gefunden")
+		return
+	}
+	raw, rerr := readRawBody(r)
+	if rerr != nil {
+		errJSON(w, 400, "ungültiges JSON")
 		return
 	}
 	var b projectBody
@@ -77,7 +87,7 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 	if b.Name != "" {
 		p.Name = b.Name
 	}
-	if b.Description != "" || hasJSON(r, "description") {
+	if fieldPresent(raw, "description") {
 		p.Description = b.Description
 	}
 	if b.Color != "" {
@@ -85,7 +95,8 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 	}
 	p.UpdatedAt = nowISO()
 	if err := s.st.UpdateProject(p); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	writeJSON(w, 200, p)
@@ -93,7 +104,8 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.DeleteProject(r.PathValue("id")); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	w.WriteHeader(204)
@@ -113,7 +125,8 @@ type roomBody struct {
 func (s *Server) listRooms(w http.ResponseWriter, _ *http.Request) {
 	rooms, err := s.st.ListRooms()
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if rooms == nil {
@@ -142,6 +155,16 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "kind muss chat oder project sein")
 		return
 	}
+	// project rooms are the project's home: auto-create the linked board (UX)
+	if b.Kind == "project" && (b.ProjectID == nil || *b.ProjectID == "") {
+		proj := &store.Project{ID: newIDs("proj"), Name: b.Name, CreatedAt: nowISO(), UpdatedAt: nowISO()}
+		if err := s.st.InsertProject(proj); err != nil {
+			log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
+			return
+		}
+		b.ProjectID = &proj.ID
+	}
 	room := &store.Room{
 		ID:             newIDs("room"),
 		Name:           b.Name,
@@ -152,7 +175,8 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:      nowISO(),
 	}
 	if err := s.st.InsertRoom(room); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	created, _ := s.st.GetRoom(room.ID)
@@ -164,11 +188,17 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	room, err := s.st.GetRoom(id)
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if room == nil {
 		errJSON(w, 404, "Raum nicht gefunden")
+		return
+	}
+	raw, rerr := readRawBody(r)
+	if rerr != nil {
+		errJSON(w, 400, "ungültiges JSON")
 		return
 	}
 	var b roomBody
@@ -184,14 +214,29 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, 400, "kind muss chat oder project sein")
 			return
 		}
+		// chat → project: auto-create the linked board if none (UX)
+		if b.Kind == "project" && room.Kind != "project" && (room.ProjectID == nil || *room.ProjectID == "") {
+			name := b.Name
+			if name == "" {
+				name = room.Name
+			}
+			proj := &store.Project{ID: newIDs("proj"), Name: name, CreatedAt: nowISO(), UpdatedAt: nowISO()}
+			if err := s.st.InsertProject(proj); err != nil {
+				log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
+				return
+			}
+			room.ProjectID = &proj.ID
+		}
 		room.Kind = b.Kind
 	}
-	if hasJSON(r, "projectId") {
+	if fieldPresent(raw, "projectId") {
 		room.ProjectID = b.ProjectID
 	}
 	room.UpdatedAt = nowISO()
 	if err := s.st.UpdateRoom(room); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	updated, _ := s.st.GetRoom(id)
@@ -201,7 +246,8 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.DeleteRoom(r.PathValue("id")); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	roomChanged(s)
@@ -215,7 +261,8 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.AddRoomMember(r.PathValue("id"), b.AgentID); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	roomChanged(s)
@@ -224,7 +271,8 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.RemoveRoomMember(r.PathValue("id"), r.PathValue("agentId")); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	roomChanged(s)
@@ -236,11 +284,14 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	limit := 300
 	if v := r.URL.Query().Get("limit"); v != "" {
-		fmt.Sscanf(v, "%d", &limit)
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			limit = n
+		} // negative/NaN/garbage → default (review-2 codex M-5)
 	}
 	msgs, err := s.st.ListMessages(r.PathValue("id"), limit)
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if msgs == nil {
@@ -257,7 +308,8 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("id")
 	room, err := s.st.GetRoom(roomID)
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if room == nil {
@@ -285,7 +337,8 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  nowISO(),
 	}
 	if err := s.st.InsertMessage(m); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	writeJSON(w, 201, m)
@@ -324,7 +377,8 @@ type taskBody struct {
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.st.ListTasks(r.URL.Query().Get("projectId"))
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if tasks == nil {
@@ -362,7 +416,8 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: nowISO(),
 	}
 	if err := s.st.InsertTask(t); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	writeJSON(w, 201, t)
@@ -372,11 +427,17 @@ func (s *Server) patchTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	existing, err := s.st.GetTask(id)
 	if err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	if existing == nil {
 		errJSON(w, 404, "Task nicht gefunden")
+		return
+	}
+	raw, rerr := readRawBody(r)
+	if rerr != nil {
+		errJSON(w, 400, "ungültiges JSON")
 		return
 	}
 	var b taskBody
@@ -384,19 +445,19 @@ func (s *Server) patchTask(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "ungültiges JSON")
 		return
 	}
-	if hasJSON(r, "projectId") {
+	if fieldPresent(raw, "projectId") {
 		existing.ProjectID = b.ProjectID
 	}
 	if b.Title != "" {
 		existing.Title = b.Title
 	}
-	if hasJSON(r, "notes") {
+	if fieldPresent(raw, "notes") {
 		existing.Notes = b.Notes
 	}
 	if b.Status != "" {
 		existing.Status = b.Status
 	}
-	if hasJSON(r, "assignee") {
+	if fieldPresent(raw, "assignee") {
 		existing.Assignee = b.Assignee
 	}
 	if b.Position != nil {
@@ -404,7 +465,8 @@ func (s *Server) patchTask(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.UpdatedAt = nowISO()
 	if err := s.st.UpdateTask(existing); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	writeJSON(w, 200, existing)
@@ -412,7 +474,8 @@ func (s *Server) patchTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.DeleteTask(r.PathValue("id")); err != nil {
-		errJSON(w, 500, err.Error())
+		log.Printf("[api] store error: %v", err)
+		errJSON(w, 500, "interner Fehler")
 		return
 	}
 	w.WriteHeader(204)
@@ -421,6 +484,23 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 // ── websocket ───────────────────────────────────────────────────────
 
 func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
+	// Origin check, env-gated: browser WS-hijacking defense (review-2 M-4/H-5).
+	// Default OFF because HA-Ingress rewrites Host (Origin != r.Host there);
+	// set RELAY_WS_ORIGIN_REQUIRED=1 for plain-LAN hardening.
+	if os.Getenv("RELAY_WS_ORIGIN_REQUIRED") == "1" && strings.HasPrefix(r.Header.Get("Origin"), "http") {
+		origHost := func(raw string) string {
+			u, err := url.Parse(raw)
+			if err != nil {
+				return raw
+			}
+			return u.Host
+		}
+		o := origHost(r.Header.Get("Origin"))
+		if o != r.Host && o != (r.Header.Get("X-Forwarded-Host")) {
+			http.Error(w, "forbidden origin", 403)
+			return
+		}
+	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return

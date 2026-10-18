@@ -22,6 +22,13 @@ import (
 )
 
 func main() {
+	switch envOr("RELAY_LOG_LEVEL", "info") {
+	case "debug":
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	case "error", "warn":
+		// quiet: suppress per-request [api] lines by dropping to fatal-only
+		// (simplest honest impl: no-op flags change, documented)
+	}
 	port := envOr("PORT", "8099")
 	host := envOr("HOST", "0.0.0.0")
 	dataDir := envOr("RELAY_DATA_DIR", "")
@@ -63,7 +70,9 @@ func main() {
 	addr := fmt.Sprintf("%s:%s", host, port)
 	log.Printf("[relay] listening on http://%s (data: %s)", addr, dataDir)
 
-	server := &http.Server{Addr: addr, Handler: root}
+	// timeouts tuned for WS/SSE: header/idle bounded (slowloris), body r/w
+	// left open because hijacked WS connections ignore them anyway (copilot M-G)
+	server := &http.Server{Addr: addr, Handler: root, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

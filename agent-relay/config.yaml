@@ -41,10 +41,11 @@ map:
 
 options:
   relay_user_name: gaRON
-  openclaw_base_url: "http://localhost:18789/v1"
+  openclaw_base_url: ""  # leer = in der UI setzen (Container-localhost zeigt ins Leere)
   openclaw_token: ""
   # Optional: wenn gesetzt, verlangt die Relay-API Bearer/ ?token= (LAN-Schutz)
   api_bearer_token: ""
+  ws_origin_required: false
   log_level: info
 
 schema:
@@ -52,4 +53,5 @@ schema:
   openclaw_base_url: str?
   openclaw_token: str?
   api_bearer_token: str?
+  ws_origin_required: bool?
   log_level: list(info|debug|warn|error)?

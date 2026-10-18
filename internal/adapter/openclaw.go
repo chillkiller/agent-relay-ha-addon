@@ -133,10 +133,10 @@ func runAgentOnce(wsURL string, a AgentConfig, trigger string) (string, error) {
 	if agentID != "" {
 		agentReq["agentId"] = agentID
 	}
-	if sk := sessionKey(a); sk != "" {
+	if sk := firstNonEmpty(a.SessionKey, sessionKey(a)); sk != "" {
 		agentReq["sessionKey"] = sk
 	}
-	agentReq["timeout"] = 180000
+	agentReq["timeout"] = 480000 // match 8-min wait window (review-2 M-A)
 
 	res, err := rpc(ctx, conn, "agent", agentReq)
 	if err != nil {

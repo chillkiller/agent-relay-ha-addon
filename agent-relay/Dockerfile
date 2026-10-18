@@ -21,7 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # app binary + static assets are copied by the Supervisor build (build.yaml)
 ARG TARGETARCH
-COPY agent-relay/run.sh /run.sh
+# The Supervisor build context is THIS add-on directory — bin/build.sh
+# stages the binaries here (agent-relay/dist/) before the build
+# (review-2 copilot H-7: repo-root-context fails on Supervisor).
+COPY run.sh /run.sh
 COPY dist/agentrelay-${TARGETARCH:-amd64} /usr/bin/agentrelay
 RUN chmod +x /run.sh /usr/bin/agentrelay
 

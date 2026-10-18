@@ -15,7 +15,7 @@
       </header>
 
       <nav class="nav" id="mainNav">
-        <button class="nav-btn active" data-view="chat">💬 Chats</button>
+        <button class="nav-btn active" data-view="chat">💬 Räume</button>
         <button class="nav-btn" data-view="agents">🤖 Agents</button>
         <button class="nav-btn" data-view="projects">🗂 Projekte</button>
         <button class="nav-btn" data-view="settings">⚙️ Einstellungen</button>
@@ -59,7 +59,7 @@
         </div>
         <div class="typing" id="typingBar"></div>
         <form class="composer" id="composer">
-          <textarea id="composerInput" placeholder="Nachricht an alle Agents im Raum…" rows="2"></textarea>
+          <textarea id="composerInput" placeholder="Nachricht in den Raum…" rows="2"></textarea>
           <button type="submit" title="Senden">➤</button>
         </form>
       </section>
@@ -90,8 +90,8 @@
           <label>OpenClaw / LLM Basis-URL
             <input name="openclawBaseUrl" placeholder="http://host:18789/v1" />
           </label>
-          <label>Bearer-Token (optional)
-            <input name="openclawToken" type="password" placeholder="nur im LAN-Modus" />
+          <label>Gateway-Token (optional)
+            <input name="openclawToken" type="password" placeholder="Bearer für das LLM-Gateway" />
           </label>
           <div class="hint">Für OpenClaw: Gateway-HTTP freischalten
             (<code>gateway.http.endpoints.chatCompletions.enabled</code>) und Agent-Ziele wie

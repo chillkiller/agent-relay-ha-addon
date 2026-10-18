@@ -5,7 +5,6 @@ package store
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,10 +27,12 @@ type Agent struct {
 	Adapter      string `json:"adapter"`
 	Model        string `json:"model"`
 	BaseURL      string `json:"baseUrl"`
-	APIKey       string `json:"apiKey"`
-	Enabled      bool   `json:"enabled"`
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
+	// APIKey is deliberately NOT serialised (review-2 copilot H-2): the UI
+	// only sets it (write-only), never needs it back.
+	APIKey    string `json:"-"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 type Project struct {
@@ -124,16 +125,14 @@ func tryWAL(db *sql.DB) error {
 }
 
 func migrate(db *sql.DB) error {
-	// idempotent upgrade for pre-existing databases (rooms.kind, 2026-10-18)
-	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'`); err == nil {
-	} else if !strings.Contains(err.Error(), "duplicate column") {
-		_ = err // tolerate; verify next
-	}
-	prag := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('rooms') WHERE name='kind'`)
-	var kindCols int
-	_ = prag.Scan(&kindCols)
-	if kindCols == 0 {
-		return errors.New("migration failed: rooms.kind missing")
+	// idempotent upgrade for pre-existing databases: on fresh DBs the CREATE
+	// TABLE below already carries kind; run ALTER only when the table exists
+	// without it (error "no such table" is fine for fresh DBs).
+	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("rooms.kind alter: %w", err)
+		}
 	}
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS settings (

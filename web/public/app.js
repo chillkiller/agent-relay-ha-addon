@@ -28,12 +28,21 @@
     : location.pathname.replace(/\/[^/]*$/, "");
   const url = (p) => `${BASE}${p}`;
 
+  // optional API bearer (LAN gate): asked once on 401, kept in sessionStorage
+  function bearer() { return sessionStorage.getItem("relayBearer") || ""; }
+
   async function api(method, path, body) {
+    const headers = body ? { "Content-Type": "application/json" } : {};
+    if (bearer()) headers["Authorization"] = `Bearer ${bearer()}`;
     const res = await fetch(url(path), {
       method,
-      headers: body ? { "Content-Type": "application/json" } : {},
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 401) {
+      const tok = prompt("API-Token erforderlich (api_bearer_token):");
+      if (tok) { sessionStorage.setItem("relayBearer", tok); return api(method, path, body); }
+    }
     if (res.status === 204) return null;
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || res.statusText);
@@ -51,12 +60,15 @@
   // ── websocket ──────────────────────────────────────────────────────
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}${url("/ws")}`);
+        const tokQ = bearer() ? `?token=${encodeURIComponent(bearer())}` : "";
+    const ws = new WebSocket(`${proto}://${location.host}${url("/ws")}${tokQ}`);
     state.ws = ws;
-    ws.onopen = () => setConn(true);
+    ws.onopen = () => { attempts = 0; setConn(true); };
+    let attempts = 0;
     ws.onclose = () => {
       setConn(false);
-      setTimeout(connectWS, 2000);
+      const delay = Math.min(15000, 500 * Math.pow(2, attempts++)); // 0.5,1,2,4…15s (review-2)
+      setTimeout(connectWS, delay);
     };
     ws.onmessage = (ev) => {
       let msg;
@@ -154,11 +166,17 @@
 
   function renderRoomList() {
     const el = $("#roomList");
-    el.innerHTML = state.rooms.map((r) => `
+    const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat");
+    const projRooms = state.rooms.filter((r) => r.kind === "project");
+    const item = (r) => `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}" data-room="${r.id}" data-kind="${esc(r.kind || "chat")}">
-        <span>${r.kind === "project" ? "🗂" : "#"}</span><span style="flex:1">${esc(r.name)}</span>
+        <span>${r.kind === "project" ? "🗂" : "#"}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</span>
         <span class="badge">${r.messageCount || ""}</span>
-      </button>`).join("");
+      </button>`;
+    const group = (label, rooms) => rooms.length ? `
+      <div class="room-group">${label} <span class="badge">${rooms.length}</span></div>
+      ${rooms.map(item).join("")}` : "";
+    el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projRooms);
     el.querySelectorAll("[data-room]").forEach((b) => {
       b.addEventListener("click", () => selectRoom(b.dataset.room));
       // drop target: agent-chip here = join room
@@ -339,6 +357,12 @@
     ], async (form) => {
       const data = Object.fromEntries(new FormData(form).entries());
       data.enabled = form.enabled.checked;
+      // write-only apiKey: only send when the user typed something — an empty
+      // field must NOT clear the stored key (key never renders back).
+      if (!data.apiKey) {
+        const { apiKey, ...rest } = data;
+        data = rest;
+      }
       if (id) await api("PATCH", `/api/agents/${id}`, data);
       else await api("POST", "/api/agents", data);
       await loadAgents(); await loadRooms();

@@ -2,7 +2,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -26,10 +25,10 @@ type Runtime struct {
 	bus      Bus
 	mu       sync.RWMutex
 	adapters map[string]adapter.Adapter
-	// cancels tracks per-message fan-out so Shutdown()/Stop can revoke
-	// scheduled turns immediately (review H-1).
-	cancels map[string]context.CancelFunc
 	stop    chan struct{}
+	// per-agent turn serialization (review-2 copilot M-B)
+	busy    map[string]bool
+	pending map[string]*store.Message // agentID -> latest queued user msg
 }
 
 func New(st *store.DB, bus Bus) *Runtime {
@@ -37,8 +36,9 @@ func New(st *store.DB, bus Bus) *Runtime {
 		st:       st,
 		bus:      bus,
 		adapters: map[string]adapter.Adapter{},
-		cancels:  map[string]context.CancelFunc{},
 		stop:     make(chan struct{}),
+		busy:     map[string]bool{},
+		pending:  map[string]*store.Message{},
 	}
 }
 
@@ -52,10 +52,6 @@ func (r *Runtime) Stop() {
 	default:
 		close(r.stop)
 	}
-	for msgKey, cancel := range r.cancels {
-		cancel()
-		delete(r.cancels, msgKey)
-	}
 	r.mu.Unlock()
 }
 
@@ -66,6 +62,16 @@ func (r *Runtime) SetBus(b Bus) {
 	r.mu.Lock()
 	r.bus = b
 	r.mu.Unlock()
+}
+
+// publish captures the bus under RLock (review-2 codex H-2: racing SetBus).
+func (r *Runtime) publish(event string, payload map[string]any) {
+	r.mu.RLock()
+	b := r.bus
+	r.mu.RUnlock()
+	if b != nil {
+		b.Publish(event, payload)
+	}
 }
 
 func (r *Runtime) AdapterIDs() []string {
@@ -93,34 +99,59 @@ func (r *Runtime) OnUserMessage(m *store.Message) {
 	for i, a := range targets {
 		agent := a
 		delay := time.Duration(i) * 900 * time.Millisecond
-		ctx, cancel := context.WithTimeout(context.Background(), delay+10*time.Minute)
-		r.mu.Lock()
-		// key: message+agent pair so repeated sends cancel cleanly on Stop()
-		r.cancels[m.ID+"|"+agent.ID] = cancel
-		r.mu.Unlock()
 		go func() {
-			defer func() {
-				r.mu.Lock()
-				delete(r.cancels, m.ID+"|"+agent.ID)
-				r.mu.Unlock()
-				cancel()
-			}()
 			select {
 			case <-time.After(delay):
-			case <-ctx.Done():
-				return // cancelled (shutdown or superseded)
 			case <-r.stop:
 				return
 			}
-			if err := r.turn(agent, m); err != nil {
-				log.Printf("[runtime] turn failed (%s): %v", agent.Name, err)
-				r.bus.Publish("system", map[string]any{
-					"roomId": m.RoomID,
-					"text":   fmt.Sprintf("⚠️ %s: %v", agent.Name, err),
-				})
-			}
+			r.enqueueTurn(agent, m)
 		}()
 	}
+}
+
+// enqueueTurn runs the agent's turn now if idle, otherwise queues it
+// (latest-wins) and runs it when the current turn finishes
+// (review-2 copilot M-B: no parallel turns of the same harness session).
+func (r *Runtime) enqueueTurn(agent *store.Agent, m *store.Message) {
+	r.mu.Lock()
+	if r.busy[agent.ID] {
+		r.pending[agent.ID] = m // latest wins
+		r.mu.Unlock()
+		return
+	}
+	r.busy[agent.ID] = true
+	r.mu.Unlock()
+
+	var run func(msg *store.Message)
+	run = func(msg *store.Message) {
+		// next queued turn runs after this one (deferred chain)
+		defer func() {
+			r.mu.Lock()
+			next := r.pending[agent.ID]
+			delete(r.pending, agent.ID)
+			if next == nil {
+				delete(r.busy, agent.ID)
+			}
+			r.mu.Unlock()
+			if next != nil {
+				run(next)
+			}
+		}()
+		select {
+		case <-r.stop:
+			return
+		default:
+		}
+		if err := r.turn(agent, msg); err != nil {
+			log.Printf("[runtime] turn failed (%s): %v", agent.Name, err)
+			r.publish("system", map[string]any{
+				"roomId": msg.RoomID,
+				"text":   fmt.Sprintf("⚠️ %s: %v", agent.Name, err),
+			})
+		}
+	}
+	run(m)
 }
 
 func mentioned(text string, agents []*store.Agent) []*store.Agent {
@@ -195,6 +226,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		cfg.APIKey = firstNonEmpty(tk, os.Getenv("RELAY_OPENAI_API_KEY"))
 	}
 	cfg.IdempotencyKey = userMsg.ID
+	cfg.SessionKey = fmt.Sprintf("agent:%s:relay:%s", a.ID, userMsg.RoomID)
 
 	// stream placeholder row first, so ordering in UI is stable
 	msgID := store.NewID("msg")
@@ -212,15 +244,15 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	if err := r.st.InsertMessage(placeholder); err != nil {
 		return err
 	}
-	r.bus.Publish("agent.started", map[string]any{"message": placeholder})
-	r.bus.Publish("typing", map[string]any{
+	r.publish("agent.started", map[string]any{"message": placeholder})
+	r.publish("typing", map[string]any{
 		"roomId": userMsg.RoomID, "agentId": a.ID, "agentName": a.Name,
 	})
 
 	if err := adapt.Validate(cfg); err != nil {
 		finish := fmt.Sprintf("⚠️ %v", err)
 		_ = r.st.UpdateMessage(msgID, finish, "error")
-		r.bus.Publish("agent.finished", map[string]any{
+		r.publish("agent.finished", map[string]any{
 			"message": updated(r.st, msgID),
 		})
 		return nil
@@ -231,7 +263,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	if err != nil {
 		finish := fmt.Sprintf("⚠️ %v", err)
 		_ = r.st.UpdateMessage(msgID, finish, "error")
-		r.bus.Publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
+		r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 		return nil
 	}
 
@@ -239,11 +271,11 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	for c := range chunks {
 		if c.Err != nil {
 			_ = r.st.UpdateMessage(msgID, acc.String()+fmt.Sprintf("\n⚠️ %v", c.Err), "error")
-			r.bus.Publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
+			r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 			return nil
 		}
 		acc.WriteString(c.Text)
-		r.bus.Publish("agent.token", map[string]any{"messageId": msgID, "delta": c.Text})
+		r.publish("agent.token", map[string]any{"messageId": msgID, "delta": c.Text})
 	}
 
 	final := strings.TrimSpace(acc.String())
@@ -252,7 +284,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		final, status = "⚠️ Leere Antwort vom Adapter", "error"
 	}
 	_ = r.st.UpdateMessage(msgID, final, status)
-	r.bus.Publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
+	r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 	return nil
 }
 
@@ -268,9 +300,8 @@ func (r *Runtime) history(agentID, roomID string) []adapter.Message {
 		case "human":
 			out = append(out, adapter.Message{Role: "user", Name: m.SenderName, Content: m.Content})
 		case "agent":
-			// include agents' messages as assistant context with name hints
-			out = append(out, adapter.Message{Role: "assistant", Name: m.SenderName, Content: m.Content})
-			_ = agentID
+			// include agents' messages as assistant context with stable ids
+			out = append(out, adapter.Message{Role: "assistant", Name: m.SenderName, Content: m.Content, AgentID: m.AgentID})
 		}
 	}
 	// The last entry should be the user's message (guaranteed by DB ordering
@@ -292,7 +323,6 @@ func updated(st *store.DB, id string) any {
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
-var _ = context.Background // reserve for future ctx plumbing
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" { return v }

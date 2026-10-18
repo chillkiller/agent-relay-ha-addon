@@ -8,6 +8,9 @@ type Message struct {
 	Role    string // "user" | "assistant" | "system"
 	Name    string // sender display name (best-effort support)
 	Content string
+	// AgentID is the stable sender id for agent turns (review-2 M-2):
+	// skip-own-message checks this, never display names.
+	AgentID string
 }
 
 // Runner yields response tokens for a room turn.
@@ -44,6 +47,10 @@ type AgentConfig struct {
 	APIKey       string
 	// IdempotencyKey (optional) derives retry-safe run ids (openclaw adapter).
 	IdempotencyKey string
+	// SessionKey (optional) binds the harness session turn-scoped.
+	// Convention: agent:<agentId>:relay:<roomId> — room-scoped, no
+	// cross-room context bleed (review-2 copilot H-4).
+	SessionKey string
 }
 
 // Settings are resolved global settings snapshot.

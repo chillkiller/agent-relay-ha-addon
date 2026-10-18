@@ -10,4 +10,8 @@ for arch in amd64 arm64; do
     -ldflags="-s -w" -o "dist/agentrelay-$arch" ./cmd/agentrelay
   echo "built dist/agentrelay-$arch"
 done
-ls -la dist/
+# stage into the add-on dir: the Supervisor build context is agent-relay/
+# (review-2 copilot H-7); repo-root dist/ stays the canonical output too.
+mkdir -p agent-relay/dist
+cp dist/agentrelay-amd64 dist/agentrelay-arm64 agent-relay/dist/
+ls -la agent-relay/dist/
