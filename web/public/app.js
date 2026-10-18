@@ -3,6 +3,7 @@
   "use strict";
 
   // ── state ──────────────────────────────────────────────────────────
+  const HUMAN = "human"; // pseudo-agent id for the drag chip "du"
   const state = {
     view: "chat",
     rooms: [],
@@ -154,27 +155,88 @@
   function renderRoomList() {
     const el = $("#roomList");
     el.innerHTML = state.rooms.map((r) => `
-      <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}" data-room="${r.id}">
-        <span>#</span><span style="flex:1">${esc(r.name)}</span>
+      <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}" data-room="${r.id}" data-kind="${esc(r.kind || "chat")}">
+        <span>${r.kind === "project" ? "🗂" : "#"}</span><span style="flex:1">${esc(r.name)}</span>
         <span class="badge">${r.messageCount || ""}</span>
       </button>`).join("");
-    el.querySelectorAll("[data-room]").forEach((b) =>
-      b.addEventListener("click", () => selectRoom(b.dataset.room)));
+    el.querySelectorAll("[data-room]").forEach((b) => {
+      b.addEventListener("click", () => selectRoom(b.dataset.room));
+      // drop target: agent-chip here = join room
+      b.addEventListener("dragover", (ev) => { ev.preventDefault(); b.classList.add("dragover"); });
+      b.addEventListener("dragleave", () => b.classList.remove("dragover"));
+      b.addEventListener("drop", async (ev) => {
+        ev.preventDefault(); b.classList.remove("dragover");
+        const agentId = ev.dataTransfer.getData("text/agent-id");
+        if (!agentId || agentId === HUMAN) return;
+        await api("POST", `/api/rooms/${b.dataset.room}/members`, { agentId });
+        await loadRooms();
+        if (b.dataset.room === state.currentRoomId) await selectRoom(state.currentRoomId);
+      });
+    });
   }
+
+  let activeTab = "chat"; // per room: "chat" | "board" (project rooms)
 
   async function selectRoom(id) {
     document.body.classList.remove("sidebar-open");
     state.currentRoomId = id;
+    activeTab = "chat";
     renderRoomList();
     switchView("chat");
     const room = state.rooms.find((r) => r.id === id);
-    $("#activeRoomName").textContent = room ? `# ${room.name}` : "";
+    $("#activeRoomName").textContent = room ? `${room.kind === "project" ? "🗂" : "#"} ${room.name}` : "";
     const members = (room?.memberAgentIds || [])
       .map((aid) => state.agents.find((a) => a.id === aid))
       .filter(Boolean);
     $("#roomMembers").innerHTML = members.map((m) =>
       `<span class="chip"><span class="emoji">${esc(m.emoji)}</span>${esc(m.name)}</span>`).join("");
+    // tabs only for project rooms
+    const isProject = room?.kind === "project";
+    $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
+    document.querySelector("#view-chat .messages").style.display = "flex";
+    $("#composer").style.display = "flex";
+    document.querySelectorAll(".room-tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.tab === "chat"));
     await loadMessages();
+  }
+
+  document.querySelectorAll(".room-tab").forEach((t) =>
+    t.addEventListener("click", async () => {
+      activeTab = t.dataset.tab;
+      document.querySelectorAll(".room-tab").forEach((x) =>
+        x.classList.toggle("active", x === t));
+      showTab();
+    }));
+
+  function showTab() {
+    const msgs = document.querySelector("#view-chat .messages");
+    const composer = $("#composer");
+    const board = $("#inlineBoard");
+    if (activeTab === "board") {
+      msgs.style.display = "none";
+      composer.style.display = "none";
+      if (!board) {
+        const el = document.createElement("div");
+        el.id = "inlineBoard";
+        document.querySelector("#view-chat").insertBefore(el, msgs);
+      }
+      loadInlineBoard();
+    } else {
+      msgs.style.display = "flex";
+      composer.style.display = "flex";
+      if (board) board.remove();
+    }
+  }
+
+  let inlineBoardRoomId = null;
+  state.currentInlinePid = null;
+  async function loadInlineBoard(forceRefresh) {
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    if (room?.projectId) state.currentInlinePid = room.projectId;
+    if (!forceRefresh && inlineBoardRoomId === state.currentRoomId) return;
+    inlineBoardRoomId = state.currentRoomId;
+    const b = $("#inlineBoard");
+    if (b && window.__renderBoardInto) await window.__renderBoardInto(b, state.currentInlinePid);
   }
 
   async function loadMessages() {
@@ -233,6 +295,7 @@
   async function loadAgents() {
     state.agents = await api("GET", "/api/agents");
     if (state.view === "agents") renderAgents();
+    renderRoster();
   }
 
   function renderAgents() {
@@ -292,6 +355,69 @@
 
   const COLUMNS = [["todo", "Zu tun"], ["doing", "In Arbeit"], ["done", "Fertig"]];
 
+  // Ein Renderer für beide Flächen: Projekte-View (#projectBoard) und Board-Tab im Raum (#inlineBoard)
+  function boardHtml(forRoom, pid) {
+    const projects = pid ? state.projects.filter((p) => p.id === pid) : state.projects;
+    if (!projects.length) return `<div class="empty-state"><p>Noch keine Projekte.</p></div>`;
+    return projects.map((p) => {
+      const tasks = state.tasks.filter((t) => t.projectId === p.id);
+      return `
+      <div class="project">
+        <div class="p-head">
+          <span class="p-dot" style="background:${esc(p.color)}"></span>
+          <h3>${esc(p.name)}</h3>
+          ${forRoom ? "" : `<button class="btn danger" data-pdel="${p.id}" style="margin-left:auto">Löschen</button>`}
+        </div>
+        <div class="p-desc">${esc(p.description)}</div>
+        <div class="columns">
+          ${COLUMNS.map(([key, label]) => `
+            <div class="column">
+              <h4>${label}</h4>
+              ${tasks.filter((t) => t.status === key).map((t) => `
+                <div class="task ${t.status === "done" ? "done" : ""}">
+                  <span>${esc(t.title)}</span>
+                  <span class="who">${t.assignee ? `@${esc(assigneeName(t.assignee))}` : ""}</span>
+                  <span class="t-actions">
+                    ${t.status !== "todo" ? `<button data-tmove="${t.id}:${prevStatus(t.status)}" title="zurück">←</button>` : ""}
+                    ${t.status !== "done" ? `<button data-tmove="${t.id}:${nextStatus(t.status)}" title="weiter">→</button>` : ""}
+                    <button data-tdel="${t.id}">✕</button>
+                  </span>
+                </div>`).join("")}
+            </div>`).join("")}
+        </div>
+        <button class="add-task" data-taskadd="${p.id}">＋ Aufgabe</button>
+      </div>`;
+    }).join("");
+  }
+
+  function bindBoardHandlers(el) {
+    el.querySelectorAll("[data-pdel]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Projekt löschen (zugeordnete Aufgaben auch, Räume bleiben)")) return;
+      await api("DELETE", `/api/projects/${b.dataset.pdel}`);
+      loadBoard();
+    }));
+    el.querySelectorAll("[data-taskadd]").forEach((b) => b.addEventListener("click", () => taskModal(b.dataset.taskadd)));
+    el.querySelectorAll("[data-tmove]").forEach((b) => b.addEventListener("click", async () => {
+      const [id, st] = b.dataset.tmove.split(":");
+      await api("PATCH", `/api/tasks/${id}`, { status: st });
+      loadBoard(); loadInlineBoard(true);
+    }));
+    el.querySelectorAll("[data-tdel]").forEach((b) => b.addEventListener("click", async () => {
+      await api("DELETE", `/api/tasks/${b.dataset.tdel}`);
+      loadBoard(); loadInlineBoard(true);
+    }));
+  }
+
+  window.__renderBoardInto = async function (el, pid) {
+    state.projects = await api("GET", "/api/projects");
+    state.tasks = await api("GET", "/api/tasks", null).catch(() => api("GET", "/api/tasks"));
+    el.innerHTML = boardHtml(true, pid);
+    bindBoardHandlers(el);
+  };
+
+  async function loadInlineBoardRefresh() {
+    return loadInlineBoard(true);
+  }
   function renderBoard() {
     const el = $("#projectBoard");
     if (!state.projects.length) {
@@ -450,18 +576,22 @@
   $("#newRoomBtn").addEventListener("click", () => {
     openModal("Neuer Raum", [
       { label: "Raumname", name: "name", type: "text", required: true },
-      { label: "Agents im Raum (Mehrfachauswahl)", name: "agentIds", type: "select", options: [] },
-      { label: "Projekt (optional)", name: "projectId", type: "select", options: [] },
+      { label: "Typ", name: "kind", type: "select", value: "chat", options: [
+        { value: "chat", label: "💬 Chat-Raum" },
+        { value: "project", label: "🗂 Projekt-Raum (mit Task-Board)" },
+      ]},
+      { label: "Agents im Raum (Mehrfachauswahl, oder später reinziehen)", name: "agentIds", type: "select", options: [] },
+      { label: "Projekt (nur für chat-Kind, optional)", name: "projectId", type: "select", options: [] },
     ], async (form) => {
-      const data = { name: form.name.value };
+      const data = { name: form.name.value, kind: form.kind.value };
       data.agentIds = [...form.agentIds.selectedOptions].map((o) => o.value);
       data.projectId = form.projectId.value || null;
       const room = await api("POST", "/api/rooms", data);
       await loadRooms();
+      await loadBoard().catch(() => {});
       selectRoom(room.id);
       return true;
     });
-    // fill selects lazily
     const agentSel = $("#modal [name=agentIds]");
     agentSel.setAttribute("multiple", "multiple");
     agentSel.size = Math.max(3, state.agents.length);
@@ -501,6 +631,33 @@
     }
   });
 
+  // ── roster (drag&drop agents in/out of rooms) ──────────────────────
+  function renderRoster() {
+    const list = $("#rosterList");
+    if (!list) return;
+    const human = `<span class="roster-chip" data-agent="${HUMAN}"><span class="swatch" style="background:#27a644"></span>du</span>`;
+    list.innerHTML = human + state.agents.map((a) => `
+      <span class="roster-chip" draggable="true" data-agent="${a.id}">
+        <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} ${esc(a.name)}
+      </span>`).join("");
+    list.querySelectorAll('.roster-chip[draggable="true"]').forEach((chip) => {
+      chip.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/agent-id", chip.dataset.agent);
+        ev.dataTransfer.effectAllowed = "copyMove";
+      });
+      // drop chip back onto roster = remove from current room
+      chip.addEventListener("dragover", (ev) => { ev.preventDefault(); chip.classList.add("dragover"); });
+      chip.addEventListener("dragleave", () => chip.classList.remove("dragover"));
+      chip.addEventListener("drop", async (ev) => {
+        ev.preventDefault(); chip.classList.remove("dragover");
+        const agentId = ev.dataTransfer.getData("text/agent-id");
+        if (!agentId || agentId === HUMAN || !state.currentRoomId) return;
+        await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${agentId}`);
+        await loadRooms();
+        await selectRoom(state.currentRoomId);
+      });
+    });
+  }
   // ── boot ───────────────────────────────────────────────────────────
   async function boot() {
     try {

@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <button id="burger" aria-label="Menü">☰</button>
   <div id="app">
     <!-- ══ Sidebar ═══════════════════════════════════════════════ -->
     <aside id="sidebar">
@@ -26,6 +25,12 @@
       <div class="roomlist" id="roomList"></div>
       <button id="newRoomBtn" class="fab">＋ Neuer Raum</button>
 
+      <!-- Roster: agents + you — drag source for room membership -->
+      <div class="roster" id="roster">
+        <div class="roster-title">Teilnehmer</div>
+        <div class="roster-list" id="rosterList"></div>
+      </div>
+
       <footer class="side-foot" id="connState">
         <span class="dot" id="connDot"></span> <span id="connText">verbinde…</span>
       </footer>
@@ -33,10 +38,17 @@
 
     <!-- ══ Main ═══════════════════════════════════════════════════ -->
     <main id="main">
-      <!-- Chat view -->
+      <!-- Chat view (chat rooms AND project rooms — board is a tab) -->
       <section class="view" id="view-chat">
         <header class="chat-head" id="chatHead">
-          <h2 id="activeRoomName">Kein Raum gewählt</h2>
+          <div class="chat-head-row">
+            <button id="burger" aria-label="Menü" style="display:none">☰</button>
+            <h2 id="activeRoomName">Kein Raum gewählt</h2>
+            <nav class="room-tabs" id="roomTabs" style="display:none">
+              <button class="room-tab active" data-tab="chat">Chat</button>
+              <button class="room-tab" data-tab="board">Board</button>
+            </nav>
+          </div>
           <div id="roomMembers"></div>
         </header>
         <div class="messages" id="messages">
