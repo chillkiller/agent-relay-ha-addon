@@ -16,11 +16,13 @@ async function api(method, path, body) {
 async function main() {
   // Marker: Relay-Name prüfen — geseedet?
   const h = await api("GET", "/api/health");
-  if (h.rooms > 3 && h.agents > 5) {
-    console.log("seed existiert schon (rooms:%d agents:%d) — überspringe", h.rooms, h.agents);
+  const roomsNow = await (await fetch(B + "/api/rooms")).json();
+  const chatExists = roomsNow.some((r) => (r.kind || "chat") === "chat" && r.name === "General");
+  if (chatExists && h.agents >= 6) {
+    console.log("seed komplett vorhanden (chat-rooms + agents) — überspringe");
     return;
   }
-  console.log("seeding…", h.rooms, "rooms,", h.agents, "agents");
+  console.log("seeding…", roomsNow.length, "rooms,", h.agents, "agents, chat-rooms fehlen:", !chatExists);
 
   // ── Agenten (buzz/paperclip-Team) ──
   const agentSpecs = [
@@ -104,6 +106,14 @@ async function main() {
     }
   }
 
+  // ── Chat-Räume ANLEGEN (der fehlende Block: roomSpecs wurde definiert, nie gebaut) ──
+  const chatRooms = [];
+  for (const spec of roomSpecs) {
+    const room = await api("POST", "/api/rooms", { name: spec.name, kind: spec.kind, agentIds: spec.agents });
+    chatRooms.push(room);
+  }
+  console.log("chat-rooms angelegt:", chatRooms.map((r) => r.name).join(", "));
+
   // ── Chat-Verlauf seeden (sinnvolle Conversation-Fragmente) ──
   const chatScript = [
     [0, "human", "Team, der Relay-Stand sieht gut aus — was fehlt eurer Meinung nach?"],
@@ -117,7 +127,7 @@ async function main() {
     [3, "agent:3", "TL;DR: Quick-Wins live, Design-Zyklen geschlossen, Funktions-Audit liegt bereit."],
   ];
   for (const [roomIdx, kind, content] of chatScript) {
-    const room = roomSpecs[roomIdx];
+    const room = chatRooms[roomIdx];
     if (kind === "human") {
       await api("POST", `/api/rooms/${room.id}/messages`, { content });
       await new Promise(r => setTimeout(r, 350));
