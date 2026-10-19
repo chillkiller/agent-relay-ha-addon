@@ -203,8 +203,8 @@
       return `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
               data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
-              draggable="false">
-        <span class="room-ico">${r.kind === "project" ? "🗂" : "#"}</span>${dot}
+              ${r.projectId ? 'data-proj="1"' : ""} draggable="false">
+        ${r.kind === "dm" ? '<span class="room-ico dm-ico">🔒</span>' : `<span class="room-ico">${r.projectId ? "🗂" : "#"}</span>`}${dot}
         <span class="marquee" style="flex:1;min-width:0;text-align:left">
           <span class="marquee__text">${esc(r.name)}</span>
         </span>
@@ -250,7 +250,8 @@
           <div class="nav-group-body">${inner}</div>
         </div>`;
       };
-      const roomGroupsHtml = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+      const projLinked = state.rooms.filter((r) => r.projectId && r.humanMember !== false);
+      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind !== "dm")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
       mount.innerHTML = roomGroupsHtml + teamHtml;
       bindSidebarGroups(mount);
