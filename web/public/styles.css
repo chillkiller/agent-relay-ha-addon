@@ -8,30 +8,47 @@
 /* Design-Sprache: OpenClaw Control-UI (claw-dark), 1:1 aus der Quelle
    (docs/DESIGN.md §4). Linear-Palette bleibt Board-Alternative. */
 :root {
-  /* surfaces (claw-dark) */
-  --canvas: #0e1015;
-  --s1: #13151b;        /* sidebar-bg = bg 96% + elevated 4% ≈ */ 
-  --s2: #191c24;        /* bg-elevated */
-  --s3: #1f2330;        /* bg-hover/muted */
-  --s4: #232736;        /* lifted */
-  /* hairlines/borders (claw) */
-  --line: #1e2028;
-  --line-2: #2e3040;
-  --line-3: #3e4050;
-  /* text (claw) */
-  --ink: #f4f4f5;       /* text-strong */
-  --ink-2: #bcbcc0;     /* text / chat-text */
-  --ink-3: #8a8f98;
-  --ink-4: #62666d;
-  /* accent — claw-rot */
+  /* Control-UI canonical (claw-dark) — 1:1 aus control-ui-core-yIvVj14Y.css */
+  --bg: #0e1015;
+  --bg-accent: #13151b;
+  --bg-elevated: #191c24;
+  --bg-hover: #1f2330;
+  --bg-muted: #1f2330;
+  --card: #161920;
+  --panel: #0e1015;
+  --text: #bcbcc0;
+  --text-strong: #f4f4f5;
+  --chat-text: #bcbcc0;
+  --muted: #8b8b94;
+  --muted-strong: #898990;
+  --border: #1e2028;
+  --border-strong: #2e3040;
+  --border-hover: #3e4050;
+  --input: #1e2028;
+  --ring: #ff5c5c;
   --accent: #ff5c5c;
   --accent-hover: #ff7070;
-  --accent-tint: #a83c29;      /* human-bubble nutzt accent-hover-Variante */
-  --accent-subtle: rgba(255, 92, 92, .10);
-  /* state (claw) */
+  --accent-subtle: #ff5c5c1a;
+  --accent-glow: #ff5c5c33;
+  --accent-foreground: #0e1015;
   --ok: #22c55e;
-  --warn: #d29922;
+  --warn: #f59e0b;
   --danger: #f87171;
+  --presence-idle: #f59e0b;
+  /* Aliases for existing code */
+  --canvas: var(--bg);
+  --s1: var(--bg-accent);
+  --s2: var(--bg-elevated);
+  --s3: var(--bg-hover);
+  --s4: #232736;
+  --line: var(--border);
+  --line-2: var(--border-strong);
+  --line-3: var(--border-hover);
+  --ink: var(--text-strong);
+  --ink-2: var(--text);
+  --ink-3: #8a8f98;
+  --ink-4: var(--muted);
+  --accent-tint: #a83c29;
   /* metrics (claw): Basis-Radius 10 */
   --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-pill: 9999px;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
