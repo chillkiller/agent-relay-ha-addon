@@ -356,6 +356,7 @@
     const room = state.rooms.find((r) => r.id === id);
     $("#activeRoomIco").textContent = room?.kind === "project" ? "🗂" : "#";
     $("#activeRoomName").textContent = room?.name ?? "";
+    updateBoardBadge(room);
     renderMemberChips(room);
     const isProject = room?.kind === "project";
     $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
@@ -365,6 +366,18 @@
     await loadMessages();
     // B1 Muse: kein Autofokus beim Raumwechsel — der Composer-Rahmen bleibt
     // im Ruhe-Zustand (Hairline); Fokus gehört nur zur echten Nutzer-Absicht.
+  }
+
+  async function updateBoardBadge(room) {
+    const badge = $("#boardBadge");
+    if (!badge) return;
+    if (!room || room.kind !== "project" || !room.projectId) { badge.hidden = true; return; }
+    try {
+      const tasks = await api("GET", `/api/tasks?projectId=${room.projectId}`);
+      const open = tasks.filter((t) => t.status !== "done").length;
+      badge.textContent = open;
+      badge.hidden = open === 0;
+    } catch { badge.hidden = true; }
   }
 
   function renderMemberChips(room) {

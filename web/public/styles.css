@@ -312,6 +312,12 @@ body {
 .room-tab:hover { color: var(--ink-2); background: var(--s2); }
 .room-tab.active { background: var(--s3); color: var(--ink-2); }  /* aktiv: Text-Strong-Aura bleibt lesbar */
 .room-tab.active:hover { color: var(--ink); }
+.tab-badge {
+  display: inline-block; margin-left: 6px;
+  font-size: 10px; font-weight: 650; padding: 0 6px;
+  border-radius: var(--r-pill); background: var(--accent); color: #fff;
+  line-height: 1.5;
+}
 
 .member-row {
   display: flex; align-items: center; gap: var(--sp-3);
@@ -332,7 +338,7 @@ body {
 .messages {
   flex: 1; overflow-y: auto; min-height: 0;
   padding: var(--sp-5) var(--sp-6) var(--sp-5);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 0;  /* R10: Abstände komplett über .msg Margins (differenziert) */
   max-width: 980px; margin: 0 auto; width: 100%;
 }
 .msg { max-width: 78%; padding: 0; }
@@ -367,8 +373,9 @@ body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 .msg.error .content { background: rgba(219,106,86,.08); color: #ff9d94; box-shadow: inset 0 0 0 1px rgba(219,106,86,.35); }
-.msg.group-first .meta { margin-top: 16px; }
-.msg:not(.group-first) .meta { display: none; } /* Slack-Dichte: Kopf nur beim ersten einer Gruppe */
+.msg.group-first .meta { margin-top: 14px; }
+.msg:not(.group-first) .meta { display: none; }
+.msg + .msg:not(.group-first) { margin-top: 2px; }
 
 .empty-state {
   margin: auto; text-align: center; color: var(--ink-3);
