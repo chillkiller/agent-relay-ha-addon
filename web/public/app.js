@@ -191,11 +191,16 @@
     const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat" && r.humanMember !== false);
     const projs = state.rooms.filter((r) => r.kind === "project" && r.humanMember !== false);
     const ghost = state.rooms.filter((r) => r.humanMember === false);
-    const item = (r) => `
+    const item = (r) => {
+      // presence-dot: green if room has at least one enabled agent member
+      const mIds = r.memberAgentIds || r.agentIds || [];
+      const hasActive = mIds.some((id) => state.agents.find((ag) => ag.id === id && ag.enabled));
+      const dot = `<span class="room-presence ${hasActive ? "on" : ""}" aria-hidden="true"></span>`;
+      return `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
               data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
               draggable="false">
-        <span class="room-ico">${r.kind === "project" ? "🗂" : "#"}</span>
+        <span class="room-ico">${r.kind === "project" ? "🗂" : "#"}</span>${dot}
         <span class="marquee" style="flex:1;min-width:0;text-align:left">
           <span class="marquee__text">${esc(r.name)}</span>
         </span>
@@ -205,6 +210,7 @@
         </span>
         ${r.messageCount ? `<span class="badge">${r.messageCount}</span>` : ""}
       </button>`;
+    };
     const groupId = (label) => label.toLowerCase().replace(/[^a-z]/g, "");
     const group = (label, rooms) => {
       if (!rooms.length) return "";
@@ -439,8 +445,17 @@
     return `
       <div class="${cls}" data-mid="${m.id}">
         <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
-        <div class="content">${esc(streaming ? streamBuf[m.id] : m.content)}</div>
+        <div class="content">${renderContent(streaming ? streamBuf[m.id] : m.content)}</div>
       </div>`;
+  }
+
+
+  function renderContent(raw) {
+    // escape then turn @Name tokens into mention chips
+    let s = esc(raw);
+    // match @ followed by word chars/hyphens, render as chip
+    s = s.replace(/@([\w-]+)/g, '<span class="mention-chip">@$1</span>');
+    return s;
   }
 
   function fmtTime(iso) {
