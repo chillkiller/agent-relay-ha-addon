@@ -150,6 +150,60 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.position alter: %w", err)
 		}
 	}
+	// dm-kind support: die alte CHECK-constraint (chat|project) verhindert
+	// dm-rows; rebuild der tabelle (sqlite kann constraints nicht alter-n) —
+	// nur wenn die constraint wirklich noch die alte form trägt (idempotent)
+	var checkSql string
+	_ = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='rooms'`).Scan(&checkSql)
+	// exact-match: die ALT-form lautet vollständig CHECK (kind IN ('chat','project'))
+	// — substring-Treffer auf die NEUE form (die 'chat','project','dm' enthält)
+	// müssen ausgeschlossen sein
+	oldForm := "CHECK (kind IN ('chat','project'))"
+	if strings.Contains(checkSql, oldForm) {
+		// ACHTUNG: SQLite RENAME repointet FK-Referenzen abhängiger Tabellen mit
+		// (messages/room_members zeigten nach rooms_old — Root-Cause der
+		// "no such table: rooms_old"-INSERT-Fehler). Reihenfolge: erst drop
+		// der FK-verweisenden, dann rename, rebuild, re-create, re-attach.
+		steps := []string{
+			`PRAGMA foreign_keys=OFF`,
+			`ALTER TABLE messages RENAME TO messages_old`,
+			`ALTER TABLE room_members RENAME TO room_members_old`,
+			`ALTER TABLE rooms RENAME TO rooms_old`,
+			`CREATE TABLE rooms (
+				id TEXT PRIMARY KEY, name TEXT NOT NULL,
+				kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project','dm')),
+				human_member INTEGER NOT NULL DEFAULT 1,
+				position INTEGER NOT NULL DEFAULT 0,
+				project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+				created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+			)`,
+			`INSERT INTO rooms (id,name,kind,human_member,position,project_id,created_at,updated_at)
+			 SELECT id,name,kind,human_member,position,project_id,created_at,updated_at FROM rooms_old`,
+			`CREATE TABLE messages (
+  id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  agent_id TEXT, sender_name TEXT NOT NULL, sender_kind TEXT NOT NULL CHECK (sender_kind IN ('human','agent','system')),
+  content TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('streaming','complete','error')),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+)`,
+			`INSERT INTO messages SELECT * FROM messages_old`,
+			`CREATE TABLE room_members (
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  PRIMARY KEY (room_id, agent_id)
+)`,
+			`INSERT INTO room_members SELECT * FROM room_members_old`,
+			`DROP TABLE messages_old`,
+			`DROP TABLE room_members_old`,
+			`DROP TABLE rooms_old`,
+			`PRAGMA foreign_keys=ON`,
+		}
+		for _, st := range steps {
+			if _, err := db.Exec(st); err != nil {
+				return fmt.Errorf("rooms-dm-rebuild: %w", err)
+			}
+		}
+	}
 	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -167,7 +221,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project')),
+  kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project','dm')),
   human_member INTEGER NOT NULL DEFAULT 1,
   position INTEGER NOT NULL DEFAULT 0,
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,

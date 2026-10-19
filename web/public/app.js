@@ -190,14 +190,16 @@
     const mount = $("#navGroups");
     const el = mount || $("#roomList");
     if (!el) return;
-    const chats = state.rooms.filter((r) => (r.kind || "chat") === "chat" && r.humanMember !== false);
-    const projs = state.rooms.filter((r) => r.kind === "project" && r.humanMember !== false);
+    // Model v2: RÄUME = chat + dm gemischt (dm mit 🔒-marker, projekt-bezug
+    // als kleine 🗂-Badge am room-row); PROJEKTE ist die eigene Gruppe unten
+    const rooms_ = state.rooms.filter((r) => r.kind !== "project" && r.humanMember !== false);
     const ghost = state.rooms.filter((r) => r.humanMember === false);
     const item = (r) => {
-      // presence-dot: green if room has at least one enabled agent member
       const mIds = r.memberAgentIds || r.agentIds || [];
       const hasActive = mIds.some((id) => state.agents.find((ag) => ag.id === id && ag.enabled));
       const dot = `<span class="room-presence ${hasActive ? "on" : ""}" aria-hidden="true"></span>`;
+      // Model v2: dm = privé-marker; projekt-bezug = 🗂-mini-badge
+      const ico = r.kind === "dm" ? "🔒" : (r.projectId ? "🗂" : "#");
       return `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
               data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
@@ -258,7 +260,8 @@
       bindRosterDrag(mount);
       const qa = mount.querySelector("#newAgentQuick"); if (qa) qa.addEventListener("click", () => agentModal());
     } else {
-      el.innerHTML = group("RÄUME", chats) + group("PROJEKTE", projs) + group("AUSGELADEN", ghost);
+      const projLinked = state.rooms.filter((r) => r.projectId && r.humanMember !== false);
+    el.innerHTML = group("STREAMS", rooms_.filter((r) => r.kind !== "dm")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
     }
 
     // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)

@@ -152,8 +152,8 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	if b.Kind == "" {
 		b.Kind = "chat"
 	}
-	if b.Kind != "chat" && b.Kind != "project" {
-		errJSON(w, 400, "kind muss chat oder project sein")
+	if b.Kind != "chat" && b.Kind != "project" && b.Kind != "dm" {
+		errJSON(w, 400, "kind muss chat, project oder dm sein")
 		return
 	}
 	// project rooms are the project's home: auto-create the linked board (UX)
@@ -165,6 +165,17 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.ProjectID = &proj.ID
+	}
+	// dm-rooms: benannt nach dem agent (Emoji + Name), genau 1 Mitglied —
+	// end-to-end-Kommunikation (GaRoN-Definition), nie projektgebunden.
+	if b.Kind == "dm" {
+		if len(b.AgentIDs) != 1 {
+			errJSON(w, 400, "dm braucht genau einen Agent")
+			return
+		}
+		if a, _ := s.st.GetAgent(b.AgentIDs[0]); a != nil {
+			b.Name = a.Emoji + " " + a.Name
+		}
 	}
 	room := &store.Room{
 		ID:             newIDs("room"),
@@ -212,8 +223,8 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 		room.Name = b.Name
 	}
 	if b.Kind != "" {
-		if b.Kind != "chat" && b.Kind != "project" {
-			errJSON(w, 400, "kind muss chat oder project sein")
+		if b.Kind != "chat" && b.Kind != "project" && b.Kind != "dm" {
+			errJSON(w, 400, "kind muss chat, project oder dm sein")
 			return
 		}
 		// chat → project: auto-create the linked board if none (UX)
