@@ -563,3 +563,62 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusNormalClosure, "bye")
 	}
 }
+// ── quick-wins: reactions + search ──────────────────────────────────
+
+func (s *Server) addReaction(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Actor string `json:"actor"`
+		Emoji string `json:"emoji"`
+	}
+	if err := decode(r, &b); err != nil || b.Actor == "" || b.Emoji == "" {
+		errJSON(w, 400, "actor + emoji erforderlich")
+		return
+	}
+	if err := s.st.AddReaction(r.PathValue("id"), b.Actor, b.Emoji); err != nil {
+		log.Printf("[api] reaction add: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "message.updated", "messageId": r.PathValue("id"), "ts": time.Now().UnixMilli()})
+	writeJSON(w, 201, map[string]any{"ok": true})
+}
+
+func (s *Server) removeReaction(w http.ResponseWriter, r *http.Request) {
+	actor := r.URL.Query().Get("actor")
+	if err := s.st.RemoveReaction(r.PathValue("id"), actor, r.PathValue("emoji")); err != nil {
+		log.Printf("[api] reaction remove: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	writeJSON(w, 204, nil)
+}
+
+func (s *Server) reactionsBatch(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		MessageIds []string `json:"messageIds"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	out, err := s.st.ListReactions(b.MessageIds)
+	if err != nil {
+		log.Printf("[api] reactions batch: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) searchMessages(w http.ResponseWriter, r *http.Request) {
+	msgs, err := s.st.SearchMessages(r.PathValue("id"), r.URL.Query().Get("q"), 40)
+	if err != nil {
+		log.Printf("[api] search: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if msgs == nil {
+		msgs = []*store.Message{}
+	}
+	writeJSON(w, 200, msgs)
+}

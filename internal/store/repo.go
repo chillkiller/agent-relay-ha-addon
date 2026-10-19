@@ -1,6 +1,9 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
 // ── settings ────────────────────────────────────────────────────────
 
@@ -103,6 +106,100 @@ func (d *DB) UpdateAgent(a *Agent) error {
 func (d *DB) DeleteAgent(id string) error {
 	_, err := d.db.Exec(`DELETE FROM agents WHERE id=?`, id)
 	return err
+}
+
+// ── reactions (quick-win 1, audit P1) ────────────────────────────────
+
+func (d *DB) AddReaction(messageID, actor, emoji string) error {
+	_, err := d.db.Exec(`INSERT OR IGNORE INTO reactions (id,message_id,actor,emoji,created_at) VALUES (?,?,?,?,?)`,
+		NewID("react"), messageID, actor, emoji, now())
+	return err
+}
+
+func (d *DB) RemoveReaction(messageID, actor, emoji string) error {
+	_, err := d.db.Exec(`DELETE FROM reactions WHERE message_id=? AND actor=? AND emoji=?`,
+		messageID, actor, emoji)
+	return err
+}
+
+type ReactionSummary struct {
+	Emoji  string   `json:"emoji"`
+	Count  int      `json:"count"`
+	Actors []string `json:"actors"`
+}
+
+func (d *DB) ListReactions(messageIDs []string) (map[string][]ReactionSummary, error) {
+	out := map[string][]ReactionSummary{}
+	if len(messageIDs) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(messageIDs))
+	args := make([]any, 0, len(messageIDs))
+	for i, id := range messageIDs {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	rows, err := d.db.Query(`SELECT message_id, emoji, actor FROM reactions
+		WHERE message_id IN (`+strings.Join(ph, ",")+`) ORDER BY created_at`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type pr struct{ actor, emoji string }
+	byMsg := map[string][]pr{}
+	for rows.Next() {
+		var mid, emoji, actor string
+		if err := rows.Scan(&mid, &emoji, &actor); err != nil {
+			return nil, err
+		}
+		byMsg[mid] = append(byMsg[mid], pr{actor, emoji})
+	}
+	for mid, prs := range byMsg {
+		idx := map[string]int{}
+		var sums []ReactionSummary
+		for _, pg := range prs {
+			i, exists := idx[pg.emoji]
+			if !exists {
+				i = len(sums)
+				idx[pg.emoji] = i
+				sums = append(sums, ReactionSummary{Emoji: pg.emoji})
+			}
+			sums[i].Count++
+			sums[i].Actors = append(sums[i].Actors, pg.actor)
+		}
+		out[mid] = sums
+	}
+	return out, nil
+}
+
+// SearchMessages: LIKE-Volltextuche im Raum (quick-win 2; robust ohne FTS5-Abhängigkeit).
+func (d *DB) SearchMessages(roomID, query string, limit int) ([]*Message, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 40
+	}
+	rows, err := d.db.Query(`
+		SELECT id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at
+		FROM messages
+		WHERE room_id = ? AND content LIKE ?
+		ORDER BY created_at DESC LIMIT ?`,
+		roomID, "%"+q+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // ReorderRooms persists manual room order (drag&drop, review-7 B3).
