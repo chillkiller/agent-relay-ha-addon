@@ -17,6 +17,7 @@
     lastMetaKey: "", // msg-grouping: key des letzten gerenderten Kopfes
     adapters: [],
     settings: {},
+    reactions: {},
     ws: null,
   };
 
@@ -154,6 +155,7 @@
     }
     document.querySelectorAll(".nav-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.view === view));
+    if (view === "agents") renderAgents();   /* R11-fix: Cards fehlen, wenn Load beim Inaktivsein lief */
     if (view === "projects") loadProjectsView();
     if (view === "settings") renderSettingsForm();
     document.body.classList.remove("sidebar-open");
@@ -413,6 +415,7 @@
     Object.keys(streamBuf).forEach((k) => delete streamBuf[k]);
     const list = await api("GET", `/api/rooms/${state.currentRoomId}/messages`);
     for (const m of list) state.messages[m.id] = m;
+    await loadReactions();
     renderMessages(true);
   }
 
@@ -427,7 +430,51 @@
       return;
     }
     wrap.innerHTML = msgs.map((m, i) => msgHtml(m, msgs[i - 1])).join("");
+    wireReactionHandlers();
     if (near) scrollBottom(true);
+  }
+
+  const QUICK_REACTIONS = ["👍", "❤️", "😄", "🤔", "🔥"];
+  async function loadReactions() {
+    const ids = Object.keys(state.messages);
+    if (!ids.length) { state.reactions = {}; return; }
+    try {
+      state.reactions = await api("POST", "/api/reactions/batch", { messageIds: ids }) || {};
+    } catch { state.reactions = {}; }
+    for (const [mid, list] of Object.entries(state.reactions)) {
+      for (const r of list) {
+        if (r.actors.includes("gaRON") || r.actors.includes("Du")) r.actors = ["Du", ...r.actors.filter((x) => x !== "Du")];
+      }
+    }
+  }
+
+  function wireReactionHandlers() {
+    const wrap = $("#messages");
+    wrap.querySelectorAll("[data-rxadd]").forEach((b) =>
+      b.addEventListener("click", (ev) =>
+        openReactionPicker(ev.currentTarget, b.dataset.rxadd)));
+    wrap.querySelectorAll("[data-rx]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const [mid, emoji] = b.dataset.rx.split(":");
+        const mine = b.classList.contains("mine");
+        try {
+          await api(mine ? "DELETE" : "POST",
+                    mine ? `/api/messages/${mid}/reactions/${encodeURIComponent(emoji)}?actor=Du`
+                         : `/api/messages/${mid}/reactions`,
+                    mine ? null : { actor: "Du", emoji });
+        } catch (err) { toast(err.message); }
+        await loadReactions(); renderMessages();
+      }));
+  }
+
+  function openReactionPicker(anchor, messageId) {
+    openPopover(anchor, "Reaktion", QUICK_REACTIONS.map((e) => ({
+      label: `${e} ${e}`,
+      run: async () => {
+        await api("POST", `/api/messages/${messageId}/reactions`, { actor: "Du", emoji: e });
+        await loadReactions(); renderMessages();
+      },
+    })));
   }
 
   function scrollBottom(force) {
@@ -449,6 +496,10 @@
       return `<div class="msg system" data-mid="${m.id}"><div class="content">${esc(m.content)}</div></div>`;
     }
     const agent = m.agentId ? state.agents.find((a) => a.id === m.agentId) : null;
+    const rx = (state.reactions[m.id] || [])
+      .map((r) => `<button class="rx-chip ${r.actors.includes("Du") ? "mine" : ""}" data-rx="${m.id}:${r.emoji}" title="${esc(r.actors.join(", "))}">${r.emoji} ${r.count}</button>`).join("");
+    const rxBar = m.senderKind === "system" ? "" :
+      `<div class="rx-bar">${rx}<button class="rx-add" data-rxadd="${m.id}" title="Reaktion">＋</button></div>`;
     const who = m.senderKind === "human" ? "du" : m.senderName;
     const groupFirst = !prev || prev.senderKind !== m.senderKind || prev.senderName !== m.senderName;
     const time = fmtTime(m.createdAt);
@@ -459,6 +510,7 @@
       <div class="${cls}" data-mid="${m.id}">
         <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
         <div class="content">${renderContent(streaming ? streamBuf[m.id] : m.content)}</div>
+        ${rxBar}
       </div>`;
   }
 
@@ -626,7 +678,7 @@
       return;
     }
     el.innerHTML = state.agents.map((a) => `
-      <div class="card">
+      <div class="card${a.enabled ? "" : " is-disabled"}">
         <div class="row">
           <span class="emoji">${esc(a.emoji)}</span>
           <div><div class="name">${esc(a.name)}</div>
@@ -693,6 +745,7 @@
       const tasks = state.tasks.filter((t) => t.projectId === p.id);
       const doing = tasks.filter((t) => t.status === "doing").length;
       const done = tasks.filter((t) => t.status === "done").length;
+      const preview = tasks.filter((t) => t.status !== "done").slice(0, 3);
       const members = (room?.memberAgentIds || []).map((aid) => state.agents.find((a) => a.id === aid)).filter(Boolean);
       return `
       <button class="proj-tile" data-open="${room?.id ?? ""}">
@@ -700,7 +753,8 @@
           <span class="tile-name">${esc(p.name)}</span>
           <span class="tile-meta" style="margin-left:auto">${doing ? `${doing} aktiv · ` : ""}${done} fertig</span></span>
         <span class="tile-meta">${esc(p.description || "—")}</span>
-        <span class="tiles-members">${members.map((m) => `<span class="swatch" style="background:${esc(m.color)};width:10px;height:10px;border-radius:50%;display:inline-block"></span>`).join("")}</span>
+        <span class="tile-preview">${preview.map((t) => `<span class="tp ${t.status === "doing" ? "tp-doing" : ""}">${esc(t.title)}</span>`).join("") || '<span class="tile-meta">keine offenen Tasks</span>'}</span>
+        <span class="tiles-members">${members.map((m) => `<span class="swatch" style="background:${esc(m.color)};width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:-4px"></span>`).join("")}</span>
       </button>`;
     }).join("");
     el.querySelectorAll("[data-open]").forEach((b) =>
@@ -771,6 +825,7 @@
                   <span class="t-actions">
                     ${t.status !== "todo" ? `<button data-tmove="${t.id}:${prevStatus(t.status)}" title="zurück">←</button>` : ""}
                     ${t.status !== "done" ? `<button data-tmove="${t.id}:${nextStatus(t.status)}" title="weiter">→</button>` : ""}
+                    <button data-tedit="${t.id}" title="Bearbeiten">✎</button>
                     <button data-tdel="${t.id}" title="löschen">✕</button>
                   </span>
                 </div>`).join("") || `<div class="hint" style="padding:4px 2px">—</div>`}
@@ -789,6 +844,26 @@
       await api("DELETE", `/api/tasks/${b.dataset.tdel}`);
       renderInlineBoard();
     }));
+    el.querySelectorAll("[data-tedit]").forEach((b) => b.addEventListener("click", () => taskEditModal(b.dataset.tedit)));
+  }
+
+  function taskEditModal(taskId) {
+    const t = state.tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    openModal("Aufgabe bearbeiten", [
+      { label: "Titel", name: "title", type: "text", value: t.title, required: true },
+      { label: "Notizen", name: "notes", type: "textarea", value: t.notes ?? "" },
+      { label: "Status", name: "status", type: "select", value: t.status, options: COLUMNS.map(([v, l]) => ({ value: v, label: l })) },
+      { label: "Agent", name: "assignee", type: "select", value: t.assignee ?? "", options: [
+        { value: "", label: "— niemand —" },
+        ...state.agents.map((a) => ({ value: a.id, label: `${a.emoji} ${a.name}` })),
+      ]},
+    ], async (form) => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      await api("PATCH", `/api/tasks/${taskId}`, data);
+      renderInlineBoard();
+      return true;
+    });
   }
 
   function assigneeName(assignee) {
@@ -964,6 +1039,28 @@
   $("#burger").addEventListener("click", () =>
     document.body.classList.toggle("sidebar-open"));
 
+  // quick-win 2: Chat-Suche mit live-Ergebnis-Popover
+  function wireSearch() {
+    const inp = $("#searchInput");
+    if (!inp) return;   /* guard: Element landet erst mit dem HTML-Zug (R11-Koordination) */
+    inp.addEventListener("input", async () => {
+      const q = inp.value.trim();
+      if (!q || !state.currentRoomId) return;
+      try {
+        const hits = await api("GET", `/api/rooms/${state.currentRoomId}/search?q=${encodeURIComponent(q)}`);
+        openPopover(inp, `Suche "${q}" (${hits.length})`, hits.slice(0, 8).map((m) => ({
+          label: `${m.senderName}: ${m.content.slice(0, 60)}`,
+          run: () => {  // zum Treffer scrollen
+            const el = document.querySelector(`[data-mid="${m.id}"]`);
+            if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.style.outline = "2px solid var(--accent-hover)"; setTimeout(() => el.style.outline = "", 1600); }
+          },
+        })));
+      } catch { /* silent */ }
+    });
+    inp.addEventListener("keydown", (ev) => { if (ev.key === "Escape") inp.value = ""; });
+  }
+  wireSearch();
+
   // User-Dropdown unten (Identity-Card)
   (() => {
     const card = $("#identityCard"), menu = $("#userMenu");
@@ -973,10 +1070,12 @@
     menu.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => { close(); switchView(b.dataset.view); }));
     menu.querySelectorAll("[data-user-act]").forEach((b) => b.addEventListener("click", () => {
       close();
-      if (b.dataset.userAct === "newRoom") document.getElementById("newRoomBtn")?.click() || openNewRoom();
-      if (b.dataset.userAct === "newAgent") agentModal();
+      const act = b.dataset.userAct;
+      if (act === "newRoom") openNewRoom();
+      else if (act === "newAgent") agentModal();
+      else if (act) switchView(act);
     }));
-    document.addEventListener("click", (ev) => { if (!menu.hidden && !card.contains(ev.target) && !menu.contains(ev.target)) close(); });
+    document.addEventListener("mousedown", (ev) => { if (!menu.hidden && !card.contains(ev.target) && !menu.contains(ev.target)) close(); });
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
   })();
   function openNewRoom() {

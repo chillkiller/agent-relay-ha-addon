@@ -164,6 +164,30 @@ body {
 }
 .room-action:hover { color: var(--ink); background: var(--s4); }
 .room-item .badge { transition: opacity .12s; }
+
+/* Reaktionen (quick-win 1): chips-bar unter der Message */
+.rx-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.rx-chip, .rx-add {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; padding: 1px 8px 2px; border-radius: var(--r-pill);
+  border: 1px solid var(--line); background: var(--s2); color: var(--ink-2);
+  cursor: pointer; font-family: inherit;
+}
+.rx-chip:hover, .rx-add:hover { border-color: var(--line-2); background: var(--s3); }
+.rx-chip.mine { border-color: var(--accent); background: var(--accent-subtle); }
+.rx-add { opacity: 0; transition: opacity .12s; }
+.msg:hover .rx-add { opacity: .7; }
+.msg:hover .rx-add:hover { opacity: 1; }
+
+/* Suche (quick-win 2): dezentes Input im Raumkopf */
+.search-input {
+  width: 140px; padding: 4px 10px; font-size: 12.5px;
+  background: var(--s2); border: 1px solid var(--line);
+  color: var(--ink); border-radius: var(--r-pill);
+  transition: width .15s, border-color .12s;
+}
+.search-input:focus { outline: none; width: 220px; border-color: var(--accent); }
+.search-input::placeholder { color: var(--ink-4); }
 .room-item:hover .badge { opacity: 0; } /* Actions ersetzen das Badge beim Hover (wie Control-UI) */
 
 /* Namensüberlauf: text-overflow ellipsis (Control-UI-Muster, kein JS-Timing):
@@ -242,6 +266,8 @@ body {
 }
 .identity:hover { border-color: var(--line-2); }
 .identity { cursor: pointer; }
+.identity-chev { transition: transform .12s ease; }      /* R11: Chevron dreht mit */
+.identity[aria-expanded="true"] .identity-chev { transform: rotate(180deg); }
 .identity:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-tint); border-color: var(--accent); }
 .user-menu {
   position: absolute; bottom: calc(100% + 6px); left: var(--sp-2); right: var(--sp-2);
@@ -316,7 +342,7 @@ body {
   display: inline-block; margin-left: 6px;
   font-size: 10px; font-weight: 650; padding: 0 6px;
   border-radius: var(--r-pill); background: var(--accent); color: #fff;
-  line-height: 1.5;
+  line-height: 1.5; font-variant-numeric: tabular-nums;  /* R11: Zahlen springen nicht */
 }
 
 .member-row {
@@ -337,9 +363,9 @@ body {
 /* Nachrichten */
 .messages {
   flex: 1; overflow-y: auto; min-height: 0;
-  padding: var(--sp-5) var(--sp-6) var(--sp-5);
+  padding: var(--sp-5) 0;   /* R11: horizontale Ausrückung über width, nicht padding */
   display: flex; flex-direction: column; gap: 0;  /* R10: Abstände komplett über .msg Margins (differenziert) */
-  max-width: 980px; margin: 0 auto; width: 100%;
+  max-width: 948px; margin: 0 auto; width: calc(100% - var(--sp-6));
 }
 .msg { max-width: 78%; padding: 0; }
 .msg .meta {
@@ -347,7 +373,7 @@ body {
   font-size: 12.5px; margin: 10px 0 2px;
 }
 .msg .meta .who { font-weight: 650; color: var(--ink); }
-.msg .meta .time { color: var(--ink-4); font-size: 11.5px; }
+.msg .meta .time { color: var(--ink-4); font-size: 11.5px; font-variant-numeric: tabular-nums; }  /* R11: Zahlen springen nicht */
 .msg .content {
   white-space: pre-wrap; word-wrap: break-word;
   color: var(--ink-2); border-radius: var(--r-lg);
@@ -368,10 +394,25 @@ body {
 .msg.human .meta { justify-content: flex-end; flex-direction: row-reverse; }
 .msg.system { align-self: center; max-width: 88%; }
 .msg.system .content { background: none; color: var(--ink-4); font-size: 12.5px; text-align: center; padding: 2px; }
+/* R11 Feel-Zug: Typing-Dots (3 Punkte, erscheinen der Reihe nach) statt Cursor-Blind */
 .msg.streaming .content::after {
-  content: "▍"; color: var(--accent-hover); animation: blink 1s steps(2) infinite;
+  content: "•••";
+  display: inline-block; overflow: hidden; vertical-align: 1px;
+  margin-left: 6px; width: 0; height: 1em; line-height: 1;
+  color: var(--accent-hover); font-size: 10px; letter-spacing: 2px;
+  animation: sdots 1.2s linear infinite;
 }
-@keyframes blink { 50% { opacity: 0; } }
+/* Sequenziell-Pop: 0 → 1 → 2 → 3 Punkte (Mikro-Setzungen statt steps,
+   damit der 3. Punkt im Loop wirklich sichtbar ist) */
+@keyframes sdots {
+  0%, 18%   { width: 0; }
+  18.02%    { width: 0.8em; }
+  42%       { width: 0.8em; }
+  42.02%    { width: 1.6em; }
+  66%       { width: 1.6em; }
+  66.02%    { width: 2.4em; }
+  100%      { width: 2.4em; }
+}
 .msg.error .content { background: rgba(219,106,86,.08); color: #ff9d94; box-shadow: inset 0 0 0 1px rgba(219,106,86,.35); }
 .msg.group-first .meta { margin-top: 14px; }
 .msg:not(.group-first) .meta { display: none; }
@@ -410,8 +451,8 @@ body {
   background: var(--s2); border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
-  max-width: 948px; margin: auto var(--sp-3) var(--sp-3) auto;
-  width: calc(100% - var(--sp-6) - 12px);
+  max-width: 948px; margin: 0 auto var(--sp-3);   /* R11: zentriert unter .messages (Fix R8-Artifact) */
+  width: calc(100% - var(--sp-6));
   position: sticky; bottom: var(--sp-3);
 }
 @supports (corner-shape: superellipse(1.5)) { .composer { corner-shape: superellipse(1.5); } }
@@ -451,12 +492,12 @@ body {
 .card {
   background: var(--s1); border: 1px solid var(--line);
   border-radius: var(--r-lg); padding: var(--sp-4);
-  transition: border-color .12s;
+  transition: border-color .12s ease, transform .12s ease, box-shadow .12s ease;  /* R11: sanfte transitions */
 }
-.card:hover { border-color: var(--line-2); }
+.card:hover { border-color: var(--line-2); transform: translateY(-1px); box-shadow: var(--shadow-sm); }  /* R11 Feel-Zug: Lift statt nur BG */
 .card .row { display: flex; align-items: center; gap: 10px; }
 .card .emoji { font-size: 24px; }
-.card .name { font-weight: 650; letter-spacing: -0.1px; }
+.card .name { font-weight: 650; letter-spacing: -0.2px; }  /* R11 Feel-Zug: engere Headline */
 .card .sub { color: var(--ink-4); font-size: 12.5px; margin-top: 1px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; flex: none; }
 .card .desc {
@@ -465,6 +506,13 @@ body {
 }
 .card .actions { display: flex; gap: 8px; margin-top: var(--sp-3); }
 .card .actions .btn { flex: 1; padding: 6px; font-size: 12.5px; }
+.card.is-disabled .emoji, .card.is-disabled .name { opacity: .55; transition: opacity .12s ease; }  /* R11: disabled-Agent gedimmt (Control-UI --agent-avatar-opacity-Muster) */
+
+/* R11 Feel-Zug: sanfte transition auf allen interaktiven Flächen */
+.btn, .icon-btn, .nav-btn, .nav-group-head, .identity, .mini-cta, .chip,
+.user-menu button, .mention-pop button, .t-actions button, .room-tab {
+  transition: background .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
 
 /* Buttons */
 .btn {
@@ -488,13 +536,21 @@ body {
   text-align: left; border: 1px solid var(--line); border-radius: var(--r-lg);
   background: var(--s1); padding: var(--sp-4); cursor: pointer;
   display: flex; flex-direction: column; gap: 6px; font: inherit; color: inherit;
-  transition: border-color .12s, transform .12s;
+  transition: border-color .12s ease, transform .12s ease, box-shadow .12s ease;
 }
-.proj-tile:hover { border-color: var(--line-2); }
+.proj-tile:hover { border-color: var(--line-2); transform: translateY(-1px); box-shadow: var(--shadow-sm); }  /* R11: Lift statt nur BG */
 .proj-tile .tile-head { display: flex; align-items: center; gap: 8px; }
-.proj-tile .tile-name { font-weight: 650; letter-spacing: -0.1px; }
+.proj-tile .tile-name { font-weight: 650; letter-spacing: -0.2px; }
 .proj-tile .tile-meta { color: var(--ink-4); font-size: 12px; }
 .proj-tile .tiles-members { display: flex; gap: 4px; margin-top: 4px; }
+.tile-preview { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.tile-preview .tp {
+  font-size: 11.5px; color: var(--ink-3);
+  padding: 3px 8px; border-radius: var(--r-xs);
+  background: var(--s2); border: 1px solid var(--line);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile-preview .tp-doing { color: var(--ink-2); border-color: var(--line-2); }
 
 /* ═══════════ Board (Tab im Projekt-Raum) ═══════════ */
 .inline-board { flex: 1; overflow: hidden; min-height: 0; }
@@ -506,7 +562,7 @@ body {
 }
 .project { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--sp-4); }
 .p-head { display: flex; align-items: center; gap: 8px; margin-bottom: var(--sp-3); }
-.p-head h3 { font-size: 14px; font-weight: 650; letter-spacing: -0.1px; }
+.p-head h3 { font-size: 14px; font-weight: 650; letter-spacing: -0.2px; }
 .p-dot { flex: none; }
 .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .column { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px; min-height: 70px; }
@@ -610,7 +666,7 @@ body {
   }
   body.sidebar-open #sidebar { transform: translateX(0); }
   #burger { display: block; }
-  .messages { padding: var(--sp-4) var(--sp-4); }
+  .messages { padding: var(--sp-4) var(--sp-4); width: 100%; }  /* R11: width-Verzicht mobil — nur padding rückt aus */
   .msg { max-width: 92%; }
   .composer { padding: var(--sp-2) var(--sp-3); }
   .view-head { padding: 0 var(--sp-4); }
