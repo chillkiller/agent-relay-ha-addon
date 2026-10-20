@@ -618,6 +618,13 @@
         }
       }));
     el.querySelectorAll("[data-room]").forEach((b) => {
+      // Klick = Raum/Session öffnen (GaRoN 21:15: „weder Räume noch Chats
+      // mit anklicken wählbar“ — die Klick-Bindung fehlte im sidebar-v2-
+      // Umbau; data-act-Kinder stoppen die Propagation selbst).
+      b.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-act]")) return; // rename/del handle selbst
+        selectRoom(b.dataset.room);
+      });
       b.dataset.draggable = "true";
       b.setAttribute("draggable", "true");
       b.addEventListener("dragstart", (ev) => {
