@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"strconv"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -606,6 +608,107 @@ func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, msg)
+}
+
+
+// ── attachments (P1#2, Codex-Matrix 1.2 buzz-media/paperclip
+// file-resources): multipart-Upload → FS unter <dataDir>/attachments,
+// Meta in SQLite; GET serve mit Filename-Disposition; Batch liefert die
+// Meta-Liste je Message (Enrichment liefert sie inline mit).
+
+// uploadAttachment: POST /api/messages/{id}/attachments (multipart field
+// "file", evtl. mehrere files → mehrere Attachments).
+func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
+	if s.dataDir == "" {
+		errJSON(w, 409, "uploads deaktiviert (RELAY_DATA_DIR nicht gesetzt)")
+		return
+	}
+	msgID := r.PathValue("id")
+	msg, err := s.st.GetMessage(msgID)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if msg == nil {
+		errJSON(w, 404, "Nachricht nicht gefunden")
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32 MB cap (review-2-Schema)
+		errJSON(w, 400, "multipart ungültig oder >32 MB")
+		return
+	}
+	dir := filepath.Join(s.dataDir, "attachments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("[api] attachments mkdir: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	form := r.MultipartForm
+	files := form.File["file"]
+	if len(files) == 0 {
+		errJSON(w, 400, "file-Feld erforderlich")
+		return
+	}
+	out := make([]*store.Attachment, 0, len(files))
+	for _, fh := range files {
+		src, err := fh.Open()
+		if err != nil {
+			errJSON(w, 400, "datei nicht lesbar")
+			return
+		}
+		att := &store.Attachment{
+			ID:        store.NewID("att"),
+			MessageID: msgID,
+			Filename:  store.SanitizeFilename(fh.Filename),
+			Mime:      fh.Header.Get("Content-Type"),
+			Size:      fh.Size,
+			CreatedAt: nowISO(),
+		}
+		if att.Mime == "" {
+			att.Mime = "application/octet-stream"
+		}
+		att.Path = filepath.Join(dir, att.ID+"-"+att.Filename)
+		dst, err := os.Create(att.Path)
+		if err != nil {
+			src.Close()
+			log.Printf("[api] attachments create: %v", err)
+			errJSON(w, 500, "interner Fehler")
+			return
+		}
+		_, cpErr := io.Copy(dst, src)
+		src.Close()
+		dst.Close()
+		if cpErr != nil {
+			log.Printf("[api] attachments copy: %v", cpErr)
+			errJSON(w, 500, "interner Fehler")
+			return
+		}
+		if err := s.st.InsertAttachment(att); err != nil {
+			log.Printf("[api] attachments insert: %v", err)
+			errJSON(w, 500, "interner Fehler")
+			return
+		}
+		out = append(out, att)
+	}
+	s.broadcast(map[string]any{"type": "message.updated", "messageId": msgID, "ts": time.Now().UnixMilli()})
+	writeJSON(w, 201, out)
+}
+
+// serveAttachment: GET /api/attachments/{id} — Datei mit Content-Type/—
+//-Disposition (filename), keine Pfad-Information im Response.
+func (s *Server) serveAttachment(w http.ResponseWriter, r *http.Request) {
+	att, err := s.st.GetAttachment(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if att == nil {
+		errJSON(w, 404, "Attachment nicht gefunden")
+		return
+	}
+	w.Header().Set("Content-Type", att.Mime)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(att.Filename, `"`, "")+`"`)
+	http.ServeFile(w, r, att.Path)
 }
 
 // editMessage (P1#1, Codex-Matrix 1.6 buzz KIND_STREAM_MESSAGE_EDIT):

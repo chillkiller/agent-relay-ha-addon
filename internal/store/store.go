@@ -68,6 +68,17 @@ type Message struct {
 	Status     string `json:"status"` // streaming|complete|error
 	CreatedAt  string `json:"createdAt"`
 	UpdatedAt  string `json:"updatedAt"`
+	Attachments []*Attachment `json:"attachments,omitempty"` // P1#2: enriched on read
+}
+
+type Attachment struct {
+	ID        string `json:"id"`
+	MessageID string `json:"messageId"` // empty until attached
+	Filename  string `json:"filename"`
+	Mime      string `json:"mime"`
+	Size      int64  `json:"size"`
+	Path      string `json:"-"` // server-side only (no fs layout leak)
+	CreatedAt string `json:"createdAt"`
 }
 
 type Task struct {
@@ -256,6 +267,19 @@ CREATE TABLE IF NOT EXISTS tasks (
   position INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+-- Attachments (P1#2, Codex-Matrix 1.2 buzz buzz-media / paperclip
+-- file-resources): Dateianhänge an Nachrichten; Inhalt liegt im
+-- Dateisystem (RELAY_DATA_DIR/attachments), Meta hier.
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size INTEGER NOT NULL DEFAULT 0,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
 `)
 	return err
 }

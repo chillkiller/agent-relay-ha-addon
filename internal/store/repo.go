@@ -494,16 +494,129 @@ func (d *DB) ListMessages(roomID string, limit int) ([]*Message, error) {
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	d.enrichAttachments(out)
+	return out, nil
 }
 
+// GetMessage: Einzelabruf (P1#1 WS-refresh + P1#2 enrichment).
 func (d *DB) GetMessage(id string) (*Message, error) {
 	r := d.db.QueryRow(`SELECT `+msgCols+` FROM messages WHERE id=?`, id)
 	m, err := scanMessage(r)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return m, err
+	if err != nil {
+		return nil, err
+	}
+	d.enrichAttachments([]*Message{m})
+	return m, nil
+}
+
+// enrichAttachments (P1#2): füllt Message.Attachments je Batch —
+// 1 Query für alle IDs (kein N+1, review-2-Stil).
+func (d *DB) enrichAttachments(msgs []*Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	ids := make([]string, len(msgs))
+	byID := map[string]*Message{}
+	for i, m := range msgs {
+		ids[i] = m.ID
+		byID[m.ID] = m
+	}
+	q := `SELECT id,message_id,filename,mime,size,created_at FROM attachments WHERE message_id IN (` +
+		strings.Repeat("?,", len(ids)-1) + `?) ORDER BY created_at`
+	args := make([]any, len(ids))
+	for i, v := range ids {
+		args[i] = v
+	}
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return // attachments optional — leere Liste ist der ehrliche Fallback
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a := &Attachment{}
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.Mime, &a.Size, &a.CreatedAt); err != nil {
+			continue
+		}
+		if m := byID[a.MessageID]; m != nil {
+			m.Attachments = append(m.Attachments, a)
+		}
+	}
+}
+
+// SanitizeFilename (P1#2 security): basename only — strip Pfade/Controls,
+// kein Traversal (…/..), lesbare Zeichen bleiben. Exportiert: API-Handler
+// nutzen es vor dem FS-Write.
+func SanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, "\\", "/")
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 || strings.ContainsRune(`<>:"|?*`, r) {
+			return -1
+		}
+		return r
+	}, name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return "datei"
+	}
+	return name
+}
+
+// ── attachments (P1#2, Codex-Matrix 1.2) ────────────────────────────
+
+func (d *DB) InsertAttachment(a *Attachment) error {
+	_, err := d.db.Exec(`INSERT INTO attachments (id,message_id,filename,mime,size,path,created_at) VALUES (?,?,?,?,?,?,?)`,
+		a.ID, a.MessageID, a.Filename, a.Mime, a.Size, a.Path, a.CreatedAt)
+	return err
+}
+
+func (d *DB) AttachMessage(id, messageID string) error {
+	res, err := d.db.Exec(`UPDATE attachments SET message_id=? WHERE id=?`, messageID, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (d *DB) ListAttachments(messageID string) ([]*Attachment, error) {
+	rows, err := d.db.Query(`SELECT id,message_id,filename,mime,size,path,created_at FROM attachments WHERE message_id=? ORDER BY created_at`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Attachment
+	for rows.Next() {
+		a := &Attachment{}
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.Mime, &a.Size, &a.Path, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetAttachment(id string) (*Attachment, error) {
+	r := d.db.QueryRow(`SELECT id,message_id,filename,mime,size,path,created_at FROM attachments WHERE id=?`, id)
+	a := &Attachment{}
+	if err := r.Scan(&a.ID, &a.MessageID, &a.Filename, &a.Mime, &a.Size, &a.Path, &a.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return a, nil
 }
 
 func (d *DB) InsertMessage(m *Message) error {

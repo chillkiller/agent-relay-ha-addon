@@ -31,17 +31,22 @@ type sub struct {
 type Server struct {
 	st     *store.DB
 	rt     *runtime.Runtime
+	dataDir string // attachment storage root (P1#2); empty = uploads disabled
 	mu     sync.RWMutex
 	subs   map[*sub]bool
 	bearer string // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
 }
 
-func New(st *store.DB, rt *runtime.Runtime) *Server {
-	s := &Server{st: st, rt: rt, subs: map[*sub]bool{}}
+func New(st *store.DB, rt *runtime.Runtime, dataDir string) *Server {
+	s := &Server{st: st, rt: rt, subs: map[*sub]bool{}, dataDir: dataDir}
 	broadcast = s.broadcast
 	rt.SetBus(hubAdapter{})
 	return s
 }
+
+// SetDataDir wires the attachment storage root after construction — main.go
+// resolves RELAY_DATA_DIR with fallback; empty disables uploads (409).
+func (s *Server) SetDataDir(dir string) { s.dataDir = dir }
 
 // hubAdapter adapts the Server to runtime.Bus.
 type hubAdapter struct{}
@@ -147,6 +152,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/reactions/batch", s.reactionsBatch)
 	mux.HandleFunc("GET /api/messages/{id}", s.getMessage)
 	mux.HandleFunc("PATCH /api/messages/{id}", s.editMessage)
+	mux.HandleFunc("POST /api/messages/{id}/attachments", s.uploadAttachment)
+	mux.HandleFunc("GET /api/attachments/{id}", s.serveAttachment)
 	mux.HandleFunc("POST /api/messages/{id}/reactions", s.addReaction)
 	mux.HandleFunc("DELETE /api/messages/{id}/reactions/{emoji}", s.removeReaction)
 	mux.HandleFunc("GET /api/rooms/{id}/search", s.searchMessages)

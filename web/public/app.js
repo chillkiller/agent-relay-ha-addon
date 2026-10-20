@@ -736,6 +736,16 @@
         <button class="m-action" data-mact="reply" data-x="${m.id}" title="Antworten (zitieren)">↩</button>
         ${m.senderKind === "human" ? `<button class="m-action" data-mact="edit" data-x="${m.id}" title="Bearbeiten">✎</button>` : ""}
       </span>`;
+    // P1#2: Anhänge unter der Message rendern (Vorschau: Bilder inline,
+    // Dateien als Chip mit Download-Link)
+    const atts = (m.attachments || []);
+    const attHtml = atts.length ? `<div class="att-list">` + atts.map((at) => {
+      const url = `api/attachments/${at.id}`;
+      if ((at.mime || "").startsWith("image/")) {
+        return `<a class="att att-img" href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${esc(at.filename)}" loading="lazy" /><span class="att-name">${esc(at.filename)}</span></a>`;
+      }
+      return `<a class="att att-file" href="${url}"><span class="att-ico">📄</span><span class="att-name">${esc(at.filename)}</span><span class="att-size">${fmtSize(at.size)}</span></a>`;
+    }).join("") + `</div>` : "";
     // Sprint-5c (Matrix-34): Quick-Reaction-Hoverbar — 4 Emojis als
     // hover-sichtbare Buttons (opacity-0→1); ein Klick = POST+Rerender.
     // Voll-Picker (＋) bleibt daneben.
@@ -767,6 +777,7 @@
           <span class="time">${esc(time)}</span>
         </summary>
         <div class="content">${renderContent(body)}</div>
+        ${attHtml}
         ${streaming ? "" : rxBar}
       </details>`;
     }
@@ -774,8 +785,15 @@
       <div class="${cls}" data-mid="${m.id}">
         <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
         <div class="content">${renderContent(streaming ? streamBuf[m.id] : m.content)}</div>
+        ${attHtml}
         ${rxBar}
       </div>`;
+  }
+  function fmtSize(n) {
+    if (n == null) return "";
+    if (n > 1048576) return (n / 1048576).toFixed(1) + " MB";
+    if (n > 1024) return Math.round(n / 1024) + " KB";
+    return n + " B";
   }
 
 
@@ -855,13 +873,45 @@
     input.value = ""; autoGrow(); sendBtn.disabled = true; hideMention();
     // Sprint-3a: gesendeter Draft wird gelöscht (buzz-Pattern)
     try { localStorage.removeItem(`relay.draft.${state.currentRoomId}`); } catch {}
+    let posted;
     try {
-      await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
+      posted = await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
     } catch (err) {
       pushLocalSystem(err.message);
       input.value = content; autoGrow(); sendBtn.disabled = false;
+      return;
+    }
+    // P1#2: angehängte Dateien an die neue Message hängen (multipart je
+    // Datei — POST /api/messages/{id}/attachments) und Auswahlliste leeren
+    const files = composerFiles?.files;
+    if (posted?.id && files && files.length) {
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("file", f);
+        try {
+          await fetch(url(`/api/messages/${posted.id}/attachments`), {
+            method: "POST",
+            headers: bearer() ? { "Authorization": `Bearer ${bearer()}` } : {},
+            body: fd,
+          });
+        } catch (err) { toast(err.message); }
+      }
+      composerFiles.value = "";
+      updateAttachLabel();
     }
   });
+
+  // P1#2: Attach-Button + Auswahl-Anzeige (📎 N)
+  const composerFiles = $("#composerFiles");
+  const attachBtn = $("#composerAttach");
+  function updateAttachLabel() {
+    const n = composerFiles?.files?.length || 0;
+    attachBtn.textContent = n ? `📎 ${n}` : "📎";
+    if (n) input.placeholder = `Nachricht + ${n} ${n === 1 ? "Anhang" : "Anhänge"}…`;
+    else input.placeholder = "Nachricht in den Raum…  (@Agent ruft gezielt auf)";
+  }
+  attachBtn?.addEventListener("click", () => composerFiles?.click());
+  composerFiles?.addEventListener("change", updateAttachLabel);
 
   // Mention: "@frag" im Text → Vorschlagsliste
   let mentionSel = 0, mentionChoices = [];

@@ -844,3 +844,27 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 }
 /* rx-bar-Zeile: actions und quick-rx sitzen hinter dem ＋ (kompakt) */
 .rx-bar { align-items: center; }
+
+/* ── P1#2 Attachments (Codex-Matrix 1.2) ────────────── */
+/* Preview-Liste unter der Message: Bilder inline, Dateien als Chip */
+.att-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.att { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.att-img {
+  flex-direction: column; align-items: flex-start; gap: 3px;
+  max-width: 260px; border-radius: var(--r-md); overflow: hidden;
+  background: var(--s2); border: 1px solid var(--line);
+}
+.att-img img { width: 100%; max-height: 180px; object-fit: cover; display: block; }
+.att-img .att-name { font-size: 11px; color: var(--ink-3); padding: 3px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-file {
+  padding: 5px 10px; border-radius: var(--r-md);
+  background: var(--s2); border: 1px solid var(--line);
+  color: var(--ink-2); font-size: 12px; max-width: 300px;
+}
+.att-file:hover { border-color: var(--line-2); background: var(--s3); color: var(--ink); }
+.att-ico { flex: none; }
+.att-name { font-weight: 550; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-size { color: var(--ink-4); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
+/* Composer-Attach: Button grau statt accent (sekundäre Aktion, Control-UI) */
+#composerAttach { background: var(--s3) !important; color: var(--ink-2) !important; }
+#composerAttach:hover { background: var(--s4) !important; color: var(--ink) !important; }
