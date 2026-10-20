@@ -1083,3 +1083,18 @@ html[data-theme="light"] {
 .audit-verify .a-ok { color: var(--ok); font-weight: 600; }
 .audit-verify .a-bad { color: var(--danger); font-weight: 600; }
 #auditVerifyBtn { flex-shrink: 0; margin-left: auto; }
+
+/* P3#4-Demo-Fix (GaRoN 20:16): zugeklappte Sidebar klemmte den Reveal-Button
+   in der 0px-Säule fest (side-head ist IN #sidebar, overflow:hidden clippt
+   alles). Der Button wird im collapsed-Zustand fixed links oben gepinnt —
+   position:fixed entkommt dem ancestor-overflow (kein transform/filter im
+   Baum); z-sidebar über Backdrop, unter Modal. */
+#app.side-collapsed #sideCollapse {
+  position: fixed; top: 8px; left: 8px;
+  z-index: 60; /* Literal-Token-System (kein --z-sidebar), Level der fixed Overlays */
+  width: 30px; height: 30px;
+  background: var(--s2); border: 1px solid var(--border);
+  color: var(--ink-2); box-shadow: var(--shadow-sm);
+  border-radius: var(--r-md);
+}
+#app.side-collapsed #sideCollapse:hover { background: var(--s3); color: var(--ink); }
