@@ -357,6 +357,17 @@ func (d *DB) GetRoom(id string) (*Room, error) {
 	}
 	r.MemberAgentIDs = []string{}
 	mrows, err := d.db.Query(`SELECT agent_id FROM room_members WHERE room_id=?`, id)
+	// Codex-Befund 3: Roles im Raum-Response ausliefern (RoomRoles-Batch)
+	if roleRows, rrErr := d.db.Query(`SELECT agent_id, role FROM room_members WHERE room_id=?`, id); rrErr == nil {
+		defer roleRows.Close()
+		r.Roles = map[string]string{}
+		for roleRows.Next() {
+			var rid2, role2 string
+			if roleRows.Scan(&rid2, &role2) == nil {
+				r.Roles[rid2] = role2
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1115,7 +1126,7 @@ func (d *DB) DecideApproval(id, decision string) (bool, error) {
 	if decision != "granted" && decision != "denied" {
 		return false, fmt.Errorf("ungültige Entscheidung %q", decision)
 	}
-	res, err := d.db.Exec(`UPDATE approvals SET status=?, decided_at=? WHERE id=? AND status='pending'`,
+	res, err := d.db.Exec(`UPDATE approvals SET status=?, decided_at=? WHERE id=? AND status='pending' AND consumed_at IS NULL`,
 		decision, now(), id)
 	if err != nil {
 		return false, err

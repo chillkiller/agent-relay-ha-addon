@@ -255,6 +255,23 @@ func (r *Runtime) ResumeApproval(ap *store.Approval) error {
 	if err != nil || m == nil {
 		return fmt.Errorf("original message %s nicht gefunden", ap.UserMsgID)
 	}
+	// Codex-Audit H1: Raum-Membership des Agents prüfen (raum kann gelöscht/
+	// roster-geändert sein — kein Turn für ex-Members) + Token ist noch offen?
+	ok, _ := r.st.ConsumeApprovalFor(ap.AgentID, ap.UserMsgID)
+	if !ok {
+		return fmt.Errorf("Grant-Token bereits konsumiert (Doppel-Resume-Schutz)")
+	}
+	agents, _ := r.st.RoomAgents(m.RoomID)
+	stillMember := false
+	for _, a := range agents {
+		if a.ID == ap.AgentID {
+			stillMember = true
+			break
+		}
+	}
+	if !stillMember {
+		return fmt.Errorf("agent %s ist nicht mehr Mitglied des Raums", ap.AgentID)
+	}
 	r.OnUserMessage(m)
 	return nil
 }
