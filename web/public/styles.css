@@ -637,6 +637,18 @@ body {
 .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .column { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px; min-height: 70px; }
 .column h4 { font-size: 10.5px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
+.column h4 .col-count { color: var(--ink-2); font-weight: 600; margin-left: 4px; font-variant-numeric: tabular-nums; }
+/* Sprint-2 (Matrix-14/15): Status-Registry + Badge-Pill (Paperclip-Form:
+   caption, uppercase, tracking; Hintergrund = Registry-Tönung) */
+.badge-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em;
+  padding: 2px 8px; border-radius: var(--r-pill);
+  white-space: nowrap; flex: none;
+}
+.badge-pill .mono { }
+.mono { font-variant-numeric: tabular-nums; }
 .task { background: var(--s3); border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 9px; margin-bottom: 7px; font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
 .task.done { opacity: .55; text-decoration: line-through; }
 .task .who { margin-left: auto; font-size: 11.5px; color: var(--ink-4); flex: none; }

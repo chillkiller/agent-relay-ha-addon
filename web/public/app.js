@@ -798,6 +798,28 @@
     if (state.currentRoomId) renderMemberChips(state.rooms.find((r) => r.id === state.currentRoomId));
   }
 
+  // Sprint-2 (Matrix-14, Paperclip lib/status-colors.ts als EINE Quelle):
+  // Status-Registry — badge/dot/text je Zustand, überall aus dieser Funktion
+  // bedient (Board-Tiles, Agent-Cards, Run-Zustände, Conn-Dot).
+  // Farben: ok/warn/accent aus dem bestehenden Token-Satz (kein neues Rad).
+  const STATUS_REGISTRY = {
+    todo:  { label: "Zu tun",   dot: "var(--ink-4)", badge: "var(--s3)",  text: "var(--ink-3)" },
+    doing: { label: "In Arbeit", dot: "var(--warn)",  badge: "rgba(245,158,11,.14)", text: "var(--warn)" },
+    done:  { label: "Fertig",    dot: "var(--ok)",   badge: "rgba(34,197,94,.14)",  text: "var(--ok)" },
+    error: { label: "Fehler",    dot: "var(--accent)", badge: "rgba(255,92,92,.14)", text: "var(--accent-hover)" },
+    active: { label: "Aktiv",  dot: "var(--ok)",   badge: "rgba(34,197,94,.14)",  text: "var(--ok)" },
+    off:    { label: "Aus",     dot: "var(--ink-4)", badge: "var(--s3)",  text: "var(--ink-4)" },
+    streaming: { label: "Streamt", dot: "var(--accent)", badge: "rgba(255,92,92,.14)", text: "var(--accent-hover)" },
+  };
+  function statusBadge(status) {
+    const s = STATUS_REGISTRY[status] || STATUS_REGISTRY.todo;
+    return `<span class="badge-pill" style="color:${s.text};background:${s.badge}" title="${s.label}">● ${s.label}</span>`;
+  }
+  function statusDot(status) {
+    const s = STATUS_REGISTRY[status] || STATUS_REGISTRY.todo;
+    return `<span class="status-dot" style="background:${s.dot}" title="${s.label}"></span>`;
+  }
+
   function renderAgents() {
     const el = $("#agentCards");
     if (!state.agents.length) {
@@ -810,7 +832,7 @@
           <span class="emoji">${esc(a.emoji)}</span>
           <div><div class="name">${esc(a.name)}</div>
             <div class="sub">${esc(a.adapter)}${a.model ? " · " + esc(a.model) : ""}</div></div>
-          <span class="status-dot" style="background:${a.enabled ? "var(--ok)" : "var(--ink-4)"}" title="${a.enabled ? "aktiv" : "aus"}"></span>
+          ${statusBadge(a.enabled ? "active" : "off")}
         </div>
         ${a.systemPrompt ? `<div class="desc">${esc(a.systemPrompt.slice(0, 130))}${a.systemPrompt.length > 130 ? "…" : ""}</div>` : ""}
         <div class="actions">
@@ -878,9 +900,9 @@
       <button class="proj-tile" data-open="${room?.id ?? ""}">
         <span class="tile-head"><span class="p-dot" style="background:${esc(p.color)};width:10px;height:10px;border-radius:50%"></span>
           <span class="tile-name">${esc(p.name)}</span>
-          <span class="tile-meta" style="margin-left:auto">${doing ? `${doing} aktiv · ` : ""}${done} fertig</span></span>
+          <span class="tile-meta" style="margin-left:auto"><span class="mono">${doing ? `${doing} aktiv · ` : ""}${done} fertig</span></span></span>
         <span class="tile-meta">${esc(p.description || "—")}</span>
-        <span class="tile-preview">${preview.map((t) => `<span class="tp ${t.status === "doing" ? "tp-doing" : ""}">${esc(t.title)}</span>`).join("") || '<span class="tile-meta">keine offenen Tasks</span>'}</span>
+        <span class="tile-preview">${preview.map((t) => `<span class="tp ${t.status === "doing" ? "tp-doing" : ""}">${esc(t.title)}${t.status === "doing" ? statusDot("doing") : ""}</span>`).join("") || '<span class="tile-meta">keine offenen Tasks</span>'}</span>
         <span class="tiles-members">${members.map((m) => `<span class="swatch" style="background:${esc(m.color)};width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:-4px"></span>`).join("")}</span>
       </button>`;
     }).join("");
@@ -944,9 +966,10 @@
         <div class="columns">
           ${COLUMNS.map(([key, label]) => `
             <div class="column">
-              <h4>${label}</h4>
+              <h4>${label} <span class="col-count">${tasks.filter((t) => t.status === key).length}</span></h4>
               ${tasks.filter((t) => t.status === key).map((t) => `
                 <div class="task ${t.status === "done" ? "done" : ""}">
+                  ${statusBadge(t.status)}
                   <span>${esc(t.title)}</span>
                   <span class="who">${t.assignee ? `@${esc(assigneeName(t.assignee))}` : ""}</span>
                   <span class="t-actions">
