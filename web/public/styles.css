@@ -1108,3 +1108,19 @@ html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, #composerInput::-w
   background: var(--line-2); border-radius: var(--r-pill);
 }
 html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, #composerInput::-webkit-scrollbar-track { background: transparent; }
+
+/* Roster-Chips (GaRoN 20:46): runde Chips = Pill (9999) mit Avatar, Name, Status-Punkt */
+.roster-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 4px; min-height: 26px;
+  border-radius: var(--r-pill);
+  background: var(--s2); border: 1px solid transparent;
+  color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  cursor: grab; user-select: none; max-width: 100%;
+}
+.roster-chip:hover { border-color: var(--line-2); background: var(--s3); }
+.roster-chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roster-chip.idle .avatar, .roster-chip.off .avatar { filter: saturate(.55); opacity: .7; }
+.roster-chip.dragover { box-shadow: 0 0 0 1px var(--accent-hover); }
+/* Drop-Ziel-Highlight (member-row/chat-head/#messages) */
+.member-drop { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: var(--r-md); }

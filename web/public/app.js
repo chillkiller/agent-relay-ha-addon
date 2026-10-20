@@ -510,9 +510,14 @@
       const isCollapsed = (gid) => localStorage.getItem(`sidebar:collapsed:${gid}`) === "1";
       const teamHtml = (() => {
         const gid = "team"; const collapsed = isCollapsed(gid);
+        const chip = (a, p) => `<span class="roster-chip${p === "off" ? " off" : p === "idle" ? " idle" : ""}" draggable="true" data-agent="${a.id}" title="${esc(a.name)}: ${p === "online" ? "online" : p === "idle" ? "idle" : "aus"} — in einen Raum ziehen">
+          <span class="avatar p-${p}" style="background:${esc(a.color)}">${esc(a.emoji)}</span>
+          <span class="chip-name">${esc(a.name)}</span>
+          <span class="presence ${p === "off" ? "" : p}" title="${p === "online" ? "online" : p === "idle" ? "idle" : "aus"}"></span>
+        </span>`;
         const chips = [
-          `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du)"><span class="avatar" style="background:var(--ok)">G</span>du<span class="presence on"></span></span>`,
-          ...state.agents.map((a) => { const p = agentPresence(a); return `<span class="roster-chip ${p === "off" ? "off" : p === "idle" ? "idle" : ""}" draggable="true" data-agent="${a.id}" title="${a.name}: ${p === "online" ? "online" : p}"><span class="avatar p-${p}" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence ${p === "off" ? "" : p}"></span></span>`; }),
+          `<span class="roster-chip" draggable="true" data-agent="${HUMAN}" title="In einen Raum ziehen (du)"><span class="avatar" style="background:var(--ok)">G</span><span class="chip-name">du</span><span class="presence on"></span></span>`,
+          ...state.agents.map((a) => { const p = agentPresence(a); return chip(a, p); }),
         ].join("");
         return `<div class="nav-group" data-group="${gid}" aria-expanded="${collapsed ? "false" : "true"}">
           <button class="nav-group-head" data-group-toggle="${gid}"><span class="chev">${collapsed ? "▸" : "▾"}</span>Team <span class="badge" style="margin-left:auto;font-size:11px;color:var(--ink-4)">${state.agents.length + 1}</span></button>
@@ -532,8 +537,11 @@
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
       mount.innerHTML = roomGroupsHtml + teamHtml;
       bindSidebarGroups(mount);
-      // Quick-Nav Gruppe ebenfalls binden
-      bindSidebarGroups(document.getElementById("quickNavGroups") || document);
+      // Quick-Nav-Gruppe: Ziel existiert nur in Views mit eigener Quick-Nav;
+      // Fallback auf document würde JEDES Toggle doppelt binden (20:46-Bug:
+      // Team-Klick = doppelt-toggle = netto nichts). Existenz-Check statt Fallback.
+      const qn = document.getElementById("quickNavGroups");
+      if (qn) bindSidebarGroups(qn);
       // Team-Drag binden
       bindRosterDrag(mount);
       const qa = mount.querySelector("#newAgentQuick"); if (qa) qa.addEventListener("click", () => agentModal());
@@ -1292,6 +1300,43 @@
       chip.addEventListener("dragstart", (ev) => {
         ev.dataTransfer.setData("text/agent-id", chip.dataset.agent);
         ev.dataTransfer.effectAllowed = "copyMove";
+      });
+    });
+    bindRoomDropTargets((root || document));
+  }
+
+  // Drop-Ziele im Chat (GaRoN 20:49: „Wo soll man die Mitglieder rein ziehen?
+  // In den Chat geht bisher nicht“): member-row, chat-head + #messages
+  // akzeptieren text/agent-id → Member des aktuellen Raums (HUMAN = humanMember).
+  function bindRoomDropTargets(rootEl) {
+    const targets = (rootEl.nodeType === 9 ? [rootEl.querySelector(".member-row"), rootEl.querySelector(".chat-head"), rootEl.querySelector("#messages")] : [rootEl.closest(".member-row") || rootEl]).filter(Boolean);
+    targets.forEach((t) => {
+      if (!t || t.__rosterDrop) return;
+      t.__rosterDrop = true;
+      t.addEventListener("dragover", (ev) => {
+        if (!ev.dataTransfer.types.includes("text/agent-id")) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "copy";
+        t.classList.add("member-drop");
+      });
+      t.addEventListener("dragleave", () => t.classList.remove("member-drop"));
+      t.addEventListener("drop", async (ev) => {
+        t.classList.remove("member-drop");
+        const agentId = ev.dataTransfer.getData("text/agent-id");
+        if (!agentId || !state.currentRoomId) return;
+        ev.preventDefault();
+        const rid = state.currentRoomId;
+        try {
+          if (agentId === HUMAN) {
+            await api("PATCH", `/api/rooms/${rid}`, { humanMember: true });
+          } else {
+            const room = state.rooms.find((r) => r.id === rid);
+            if (room?.memberAgentIds?.includes(agentId)) return; // schon Mitglied
+            await api("POST", `/api/rooms/${rid}/members`, { agentId });
+          }
+          await loadRooms();
+          await selectRoom(rid);
+        } catch (err) { toast(err.message); }
       });
     });
   }
