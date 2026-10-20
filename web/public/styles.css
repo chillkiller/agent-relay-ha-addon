@@ -103,7 +103,7 @@ body {
 }
 .brand-glyph { color: var(--accent-hover); font-size: 17px; }
 
-.nav { display: flex; flex-direction: column; gap: 1px; padding: var(--sp-2) var(--sp-2) 0; }
+.nav { display: none; /* GaRoN 21:10: Nav gehört ins Identity-Menü (aufklappbar) — die Icon-Liste fliegt aus der Sidebar */ }
 .nav-btn {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 10px; border: 0; border-radius: var(--r-md);

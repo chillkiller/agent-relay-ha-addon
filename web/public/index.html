@@ -18,7 +18,10 @@
       </header>
 
       <!-- Views: kleine Nav-Zeile OBEN (Control-UI-Style, nicht einklappbar) -->
-      <nav class="nav" id="mainNav" aria-label="Hauptnavigation">
+      <nav class="nav" id="mainNav" aria-label="Hauptnavigation" hidden>
+        <!-- GaRoN 21:10: Nav = aufklappbares Menü in der Identity-Card;
+             die Icon-Liste hier ist veraltet (bleibt als Hidden-Fallback für
+             switchView-Anker). Buttons: Settings/Übersicht wandern ins Menü. -->
         <button class="nav-btn" data-view="chat"><span class="nav-ico">💬</span>Räume</button>
         <button class="nav-btn" data-view="agents"><span class="nav-ico">🤖</span>Agents</button>
         <button class="nav-btn" data-view="projects"><span class="nav-ico">🗂</span>Projekte</button>
@@ -46,9 +49,11 @@
         </button>
         <div class="user-menu" id="userMenu" role="menu" hidden>
           <div class="menu-head">Menü</div>
-          <button data-user-act="settings">⚙️ Einstellungen</button>
+          <button data-user-act="chat">💬 Räume</button>
           <button data-user-act="agents">🤖 Agents verwalten</button>
           <button data-user-act="projects">🗂 Projekte</button>
+          <button data-user-act="settings">⚙️ Einstellungen</button>
+          <button data-user-act="dashboard">📊 Übersicht</button>
           <button data-user-act="audit">🧾 Audit-Register</button>
           <div class="menu-sep"></div>
           <button data-user-act="notify" id="notifyToggle">🔔 Benachrichtigungen: aus</button>
