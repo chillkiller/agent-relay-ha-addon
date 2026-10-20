@@ -145,6 +145,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/rooms/{id}/members/{agentId}", s.removeMember)
 
 	mux.HandleFunc("POST /api/reactions/batch", s.reactionsBatch)
+	mux.HandleFunc("GET /api/messages/{id}", s.getMessage)
+	mux.HandleFunc("PATCH /api/messages/{id}", s.editMessage)
 	mux.HandleFunc("POST /api/messages/{id}/reactions", s.addReaction)
 	mux.HandleFunc("DELETE /api/messages/{id}/reactions/{emoji}", s.removeReaction)
 	mux.HandleFunc("GET /api/rooms/{id}/search", s.searchMessages)

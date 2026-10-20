@@ -197,6 +197,19 @@
         renderRoomList();
         break;
       }
+      case "message.updated": {
+        // P1#1: Edit-Acceptance — frische Version laden (authoritative DB).
+        // handleEvent ist sync — then/catch statt await.
+        if (e.messageId) {
+          api("GET", `/api/messages/${e.messageId}`).then((m) => {
+            if (m && m.roomId === state.currentRoomId) {
+              state.messages[m.id] = m; renderMessages();
+              loadRooms(); // Room-Subtitle live mitführen (Matrix-22)
+            }
+          }).catch(() => {});
+        }
+        break;
+      }
       case "rooms.changed": loadRooms(); break;
       case "system": {
         if (e.roomId === state.currentRoomId) pushLocalSystem(e.text);
@@ -655,16 +668,14 @@
   function editMessageModal(m) {
     openModal("Nachricht bearbeiten", [
       { label: "Text", name: "content", type: "textarea", value: m.content, rows: 4 },
-    ], async (data) => {
-      const c = (data.content || "").trim();
+    ], async (form) => {
+      // openModal-Konvention: onSubmit bekommt das form-Element (agentModal-
+      // Muster data=form) — form.content.value, nicht data.content.
+      const c = (form.content?.value || "").trim();
       if (!c) return;
       try {
         await api("PATCH", `/api/messages/${m.id}`, { content: c });
-      } catch (err) {
-        toast(err.message.includes("404") || err.message.includes("405")
-          ? "Bearbeiten-Endpoint fehlt noch (P1#1 offene Lane)"
-          : err.message);
-      }
+      } catch (err) { toast(err.message); }
     });
   }
 

@@ -594,6 +594,69 @@ func (s *Server) addReaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"ok": true})
 }
 
+// getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
+func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
+	msg, err := s.st.GetMessage(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if msg == nil {
+		errJSON(w, 404, "Nachricht nicht gefunden")
+		return
+	}
+	writeJSON(w, 200, msg)
+}
+
+// editMessage (P1#1, Codex-Matrix 1.6 buzz KIND_STREAM_MESSAGE_EDIT):
+// eigene Nachrichten editieren — content-PATCH; nur Human-Autor (actor=Du
+// über query) darf eigene human-Nachrichten ändern; streaming/editable-
+// Status-Grenzen im Client. WS message.updated treibt SPA-Refresh.
+func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var b struct {
+		Content string `json:"content"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	content := strings.TrimSpace(b.Content)
+	if content == "" {
+		errJSON(w, 400, "content erforderlich")
+		return
+	}
+	if len(content) > 16000 {
+		errJSON(w, 400, "content zu lang (max 16000)")
+		return
+	}
+	msg, err := s.st.GetMessage(id)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if msg == nil {
+		errJSON(w, 404, "Nachricht nicht gefunden")
+		return
+	}
+	if msg.SenderKind != "human" {
+		errJSON(w, 403, "nur eigene Nachrichten sind editierbar")
+		return
+	}
+	if msg.Status != "complete" {
+		errJSON(w, 409, "Nachricht ist nicht abgeschlossen")
+		return
+	}
+	if err := s.st.UpdateMessage(id, content, "complete"); err != nil {
+		log.Printf("[api] message edit: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	updated, _ := s.st.GetMessage(id)
+	s.broadcast(map[string]any{"type": "message.updated", "messageId": id, "ts": time.Now().UnixMilli()})
+	writeJSON(w, 200, updated)
+}
+
 func (s *Server) removeReaction(w http.ResponseWriter, r *http.Request) {
 	actor := r.URL.Query().Get("actor")
 	if err := s.st.RemoveReaction(r.PathValue("id"), actor, r.PathValue("emoji")); err != nil {
