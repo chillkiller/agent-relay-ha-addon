@@ -573,7 +573,7 @@
           <div class="nav-group-body">${[...byTarget.entries()].map(([aid, ss]) => memberBlock(aid, ss)).join("")}</div>
         </div>`;
       })();
-      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
+      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
       mount.innerHTML = roomGroupsHtml + chatsHtml + teamHtml;
       bindSidebarGroups(mount);
@@ -584,7 +584,7 @@
       const qa = mount.querySelector("#newAgentQuick"); if (qa) qa.addEventListener("click", () => agentModal());
     } else {
       const projLinked = state.rooms.filter((r) => r.projectId && r.humanMember !== false);
-    el.innerHTML = group("STREAMS", rooms_.filter((r) => r.kind !== "dm")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
+    el.innerHTML = group("STREAMS", rooms_.filter((r) => r.kind !== "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
     }
 
     // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)
