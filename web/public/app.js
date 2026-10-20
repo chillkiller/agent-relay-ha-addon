@@ -533,13 +533,50 @@
         </div>`;
       };
       const projLinked = state.rooms.filter((r) => r.projectId && r.humanMember !== false);
-      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind !== "dm")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
+      // CHATS (GaRoN 20:53): 1. Ebene = Mitglieder (Agents mit DMs + du),
+      // 2. Ebene = die DM-Sessions mit dem Mitglied (ausgeklappt). dm-Räume
+      // sind e2e-privat (🔒, genau 1 Agent) — gruppiert nach Gegenüber.
+      const dmRooms = state.rooms.filter((r) => r.kind === "dm");
+      const sessionItem = (dm) => item(dm);
+      const chatsHtml = (() => {
+        const byTarget = new Map();
+        for (const dm of dmRooms) {
+          const aid = (dm.memberAgentIds || [])[0] || HUMAN;
+          if (!byTarget.has(aid)) byTarget.set(aid, []);
+          byTarget.get(aid).push(dm);
+        }
+        const memberBlock = (aid, sessions) => {
+          const mgid = `chats:${aid}`;
+          const collapsed = isCollapsed(mgid);
+          const isHuman = aid === HUMAN;
+          const ag = state.agents.find((x) => x.id === aid);
+          const avatar = isHuman
+            ? `<span class="avatar" style="background:var(--ok)">G</span>`
+            : `<span class="avatar" style="background:${esc(ag?.color || "#6ea8fe")}">${esc(ag?.emoji || "🤖")}</span>`;
+          const name = isHuman ? "du" : esc(ag?.name || "Agent");
+          const unread = sessions.reduce((s, x) => s + (x.unread || 0), 0);
+          const rows = sessions.map(sessionItem).join("") || `<div class="chat-session-empty">— keine Sessions —</div>`;
+          return `<div class="nav-group chat-member" data-group="${mgid}" aria-expanded="${collapsed ? "false" : "true"}">
+            <button class="nav-group-head chat-member-head" data-group-toggle="${mgid}">
+              ${avatar}<span class="chip-name">${name}</span>
+              ${unread ? `<span class="badge chat-unread" style="margin-left:6px">${unread}</span>` : ""}
+              <span class="chev" style="margin-left:auto">${collapsed ? "▸" : "▾"}</span>
+            </button>
+            <div class="nav-group-body chat-sessions">${rows}</div>
+          </div>`;
+        };
+        if (!dmRooms.length) {
+          return navGroup("CHATS", "chats", `<div class="chat-session-empty">🔒 Noch keine DM-Chats — Team-Chip ins Chat-Fenster ziehen.</div>`);
+        }
+        return `<div class="nav-group" data-group="chats" aria-expanded="${isCollapsed("chats") ? "false" : "true"}">
+          <button class="nav-group-head" data-group-toggle="chats"><span class="chev">${isCollapsed("chats") ? "▸" : "▾"}</span>CHATS <span class="badge" style="margin-left:auto;font-size:11px;color:var(--ink-4)">${dmRooms.length}</span></button>
+          <div class="nav-group-body">${[...byTarget.entries()].map(([aid, ss]) => memberBlock(aid, ss)).join("")}</div>
+        </div>`;
+      })();
+      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("DIREKT", rooms_.filter((r) => r.kind === "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
-      mount.innerHTML = roomGroupsHtml + teamHtml;
+      mount.innerHTML = roomGroupsHtml + chatsHtml + teamHtml;
       bindSidebarGroups(mount);
-      // Quick-Nav-Gruppe: Ziel existiert nur in Views mit eigener Quick-Nav;
-      // Fallback auf document würde JEDES Toggle doppelt binden (20:46-Bug:
-      // Team-Klick = doppelt-toggle = netto nichts). Existenz-Check statt Fallback.
       const qn = document.getElementById("quickNavGroups");
       if (qn) bindSidebarGroups(qn);
       // Team-Drag binden
