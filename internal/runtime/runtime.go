@@ -200,12 +200,15 @@ func (r *Runtime) startRoutineTicker() {
 							prompt = "@" + ag.Name + " " + prompt
 						}
 					}
+					// P3-6b (opencode-Audit): Routine-Trigger MUSS das Modell
+					// erreichen — als human-artige Trigger-Nachricht (history()
+					// nimmt nur human/agent; ein system-Prompt verliert Modell-Kontakt)
 					m := &store.Message{
 						ID:         store.NewID("msg"),
 						RoomID:     room,
-						SenderName: "Routine",
-						SenderKind: "system",
-						Content:    "⏰ " + t.Name + ": " + prompt,
+						SenderName: "⏰ " + t.Name,
+						SenderKind: "human", // Trigger-Route (Agent sieht den Prompt)
+						Content:    prompt,
 						Status:     "complete",
 						CreatedAt:  nowISO,
 						UpdatedAt:  nowISO,

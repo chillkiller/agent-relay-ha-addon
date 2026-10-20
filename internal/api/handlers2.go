@@ -1015,7 +1015,13 @@ func (s *Server) createRoutine(w http.ResponseWriter, r *http.Request) {
 	if strings.Count(cron, "*") > 0 {
 		// erlaubt; Details im runtime-Ticker
 	}
-	next := "2026-12-31T00:00:00.000000000+02:00" // calc im Runtime-Ticker-Loop
+	// P3-6a (Codex/opencode-Audit): spec-Vertrag — nie-matchende Specs
+	// lehnen 400 ab (kein 24h-Fallback-Treadmill)
+	next := nextRoutineRun(cron, time.Now())
+	if next == "" {
+		errJSON(w, 400, "cron spec matcht nie (z. B. 31. Februar) — kein Fallback")
+		return
+	}
 	t := &store.Routine{
 		ID: newIDs("rt"), Name: name, Cron: cron, Prompt: prompt,
 		RoomID: b.RoomID, AgentID: b.AgentID, Enabled: true,

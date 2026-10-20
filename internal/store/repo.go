@@ -944,6 +944,7 @@ func (d *DB) UpdateSkill(skill *Skill) (string, error) {
 		return neu.ID, err
 	}
 	for _, aid := range ids {
+		_ = d.UnassignSkill(old.ID, aid) // P2-2: alte Version entlassen (doppelt-lieve im Systemprompt aus)
 		_ = d.AssignSkill(neu.ID, aid)
 	}
 	return neu.ID, nil
