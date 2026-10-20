@@ -266,7 +266,9 @@ func (d *DB) DeleteProject(id string) error {
 // ── rooms ───────────────────────────────────────────────────────────
 
 func (d *DB) ListRooms() ([]*Room, error) {
-	rows, err := d.db.Query(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at FROM rooms ORDER BY position,created_at`)
+	rows, err := d.db.Query(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at,
+			COALESCE((SELECT content FROM messages m WHERE m.room_id = rooms.id AND m.status != 'deleted' ORDER BY created_at DESC LIMIT 1), '')
+			FROM rooms ORDER BY position,created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -277,11 +279,13 @@ func (d *DB) ListRooms() ([]*Room, error) {
 		r := &Room{}
 		var pid sql.NullString
 		var hm, pos int
-		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var lastMsg string
+		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt, &lastMsg); err != nil {
 			return nil, err
 		}
 		r.HumanMember = hm == 1
 		r.Position = pos
+		r.LastMessage = lastMsg // Row-Subtitle-Digest (Matrix-22)
 		if pid.Valid {
 			r.ProjectID = &pid.String
 		}

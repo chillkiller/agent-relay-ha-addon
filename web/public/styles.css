@@ -211,7 +211,39 @@ body {
 .room-item[data-kind="chat"][data-proj] .room-ico { color: var(--warn); }
 /* Ausgeladen-Gruppe: gedimmt/verkapselt */
 .room-group-body[data-group-body="ausgeladen"] { opacity: .55; border-left: 2px solid var(--line); padding-left: 6px; }
-.room-item:hover .badge { opacity: 0; } /* Actions ersetzen das Badge beim Hover (wie Control-UI) */
+.room-item:hover .badge { opacity: 0; }
+
+/* ── Sprint-1 (Matrix-3/11/22) ──────────
+   Row-Subtitle (Matrix-22, OpenClaw chat.md:132-134): Digest-Zeile unter
+   dem Raumnamen — "what is happening" im Sidebar-Scan */
+.room-text { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.room-sub {
+  font-size: 11px; line-height: 1.35; color: var(--ink-4);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.room-item.active .room-sub { color: var(--ink-3); }
+
+/* Unread-Dot + Zähler (Matrix-3, buzz useLiveChannelUpdates.ts:34-40):
+   Unread bekommt den Akzent-Farbraum (ok bleibt Presence) */
+.room-presence.unread { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent); }
+.badge.unread-badge { color: #fff; background: var(--accent); font-weight: 600; }
+/* Unread-Badge bleibt beim Hover sichtbar (nicht durch Actions ersetzen:
+   "was entgeht mir" schlägt "was kann ich hier tun") */
+.room-item:hover .badge.unread-badge { opacity: 1; }
+
+/* "N neu ↓"-Pill (Matrix-11, OpenClaw Follow-Scroll-Vertrag): über dem
+   Composer, zentriert, Klick = scroll to bottom */
+.new-below-pill {
+  position: absolute; left: 50%; transform: translate(-50%, -50%);
+  bottom: calc(var(--sp-3, 12px) + 8px);
+  z-index: 5; border: 1px solid var(--line-2);
+  background: var(--s3); color: var(--ink);
+  font: inherit; font-size: 12px; font-weight: 600;
+  padding: 4px 12px; border-radius: var(--r-pill);
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+.new-below-pill:hover { background: var(--s4); border-color: var(--accent); }
 
 /* Namensüberlauf: text-overflow ellipsis (Control-UI-Muster, kein JS-Timing):
    das Affordance ist der … ohne Mask/Shift-Mechanik */

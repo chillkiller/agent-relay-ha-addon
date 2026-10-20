@@ -55,6 +55,7 @@ type Room struct {
 	UpdatedAt      string   `json:"updatedAt"`
 	MemberAgentIDs []string `json:"memberAgentIds"`
 	MessageCount   int      `json:"messageCount"`
+	LastMessage    string   `json:"lastMessage,omitempty"` // Row-Subtitle (Matrix-22, OpenClaw chat.md:132-134): Digest der letzten Nachricht
 }
 
 type Message struct {

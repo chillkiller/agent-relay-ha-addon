@@ -19,6 +19,10 @@
     settings: {},
     reactions: {},
     ws: null,
+    // Sprint-1 (docs/RE/2026-10-20-transfer-matrix-frontend.md: Zeilen 3/11/22):
+    following: true,  // Follow-Scroll-Vertrag: nur near-bottom auto-follow
+    newBelow: 0,      // Pill-Zähler "N neu ↓"
+    lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -28,6 +32,32 @@
 
   // ── API (Bearer aus sessionStorage, 401 → einmalig abfragen) ────────
   function bearer() { return sessionStorage.getItem("relayBearer") || ""; }
+
+  // Row-Subtitle (Matrix-22, buzz-Pattern): letzter Message-Text als Digest
+  // unter dem Raumnamen — "what is happening" im Sidebar-Scan. Live aus dem
+  // Message-Puffer (aktueller Raum) oder rooms[].lastMessage (Backend-Subselect).
+  function roomSubtitle(roomId) {
+    if (state.currentRoomId === roomId) {
+      const list = Object.values(state.messages)
+        .filter((m) => m.roomId === roomId && m.senderKind !== "system")
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      const last = list[list.length - 1];
+      return last ? String(last.content || "") : "";
+    }
+    const room = state.rooms.find((r) => r.id === roomId);
+    return room?.lastMessage || "";
+  }
+  // Read-Marker-Restore beim Boot (localStorage-Schicht, buzz-Pattern)
+  function restoreLastRead() {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("relay.lastRead.")) {
+          state.lastRead[k.slice("relay.lastRead.".length)] = Number(localStorage.getItem(k)) || 0;
+        }
+      }
+    } catch {}
+  }
 
   async function api(method, path, body) {
     const headers = body ? { "Content-Type": "application/json" } : {};
@@ -87,8 +117,18 @@
   function handleEvent(e) {
     switch (e.type) {
       case "message.created": {
-        if (e.message.roomId !== state.currentRoomId) break;
+        if (e.message.roomId !== state.currentRoomId) {
+          // Read-Marker (Matrix-3, buzz useLiveChannelUpdates.ts:34-40):
+          // anderer Raum → Unread-Zähler + Dot, ohne Öffnen
+          bumpUnread(e.message.roomId);
+          break;
+        }
         state.messages[e.message.id] = e.message;
+        // Pill-Zählung hier (nicht in renderMessages — kein Doppelzähler):
+        // nur wenn non-follow UND fremde Nachricht (Eigen-Send resynced immer)
+        if (!state.following && !nearBottom() && e.message.senderKind !== "human") {
+          state.newBelow++;
+        }
         renderMessages();
         break;
       }
@@ -109,7 +149,11 @@
       case "agent.token": {
         streamBuf[e.messageId] = (streamBuf[e.messageId] ?? "") + e.delta;
         const el = document.querySelector(`[data-mid="${e.messageId}"] .content`);
-        if (el) { el.textContent = streamBuf[e.messageId]; scrollBottom(false); }
+        if (el) el.textContent = streamBuf[e.messageId];
+        // Follow-Scroll-Vertrag: Token- Frames folgen nur near-bottom,
+        // sonst Pill-Zähler (kein Scroll-Kidnapping mehr, Matrix-11)
+        if (state.following && nearBottom()) scrollBottom(false);
+        else if (!state.following) { state.newBelow++; updateNewPill(); }
         break;
       }
       case "agent.finished": {
@@ -131,6 +175,28 @@
         break;
       }
     }
+  }
+
+  // Read-Marker (buzz-Pattern, Matrix-3): fremd-Raum-Nachricht → Zähler +
+  // Dot im Raum-Button; DOM-Update statt Full-Rerender (kein Flackern)
+  function bumpUnread(roomId) {
+    if (state.lastRead[roomId] === undefined) {
+      try { state.lastRead[roomId] = Number(localStorage.getItem(`relay.lastRead.${roomId}`)) || 0; } catch { state.lastRead[roomId] = 0; }
+    }
+    const r = state.rooms.find((x) => x.id === roomId);
+    if (!r) return;
+    r.unread = (r.unread || 0) + 1;
+    const btn = document.querySelector(`.room-item[data-room="${roomId}"]`);
+    if (!btn) return;
+    const dot = btn.querySelector(".room-presence");
+    if (dot) dot.classList.add("unread");
+    let badge = btn.querySelector(".badge");
+    if (!badge) {
+      btn.insertAdjacentHTML("beforeend", `<span class="badge unread-badge"></span>`);
+      badge = btn.querySelector(".badge");
+    }
+    badge.textContent = String(r.unread);
+    badge.classList.add("unread-badge");
   }
 
   function pushLocalSystem(text) {
@@ -182,7 +248,18 @@
   // Räume (gruppiert: RÄUME / PROJEKTE) + Drag&Drop-Ziele
   // ═════════════════════════════════════════════════════════════════
   async function loadRooms() {
+    const prev = Object.fromEntries(state.rooms.map((r) => [r.id, r]));
     state.rooms = await api("GET", "/api/rooms");
+    // clientseitige Zustände über Reloads konservieren (unread-Zähler,
+    // lastRead-Marker — Backend kennt die Read-Marker nicht)
+    for (const r of state.rooms) {
+      const p = prev[r.id];
+      if (p) {
+        if (p.unread) r.unread = p.unread;
+      } else if (state.lastRead[r.id] === undefined) {
+        try { state.lastRead[r.id] = Number(localStorage.getItem(`relay.lastRead.${r.id}`)) || 0; } catch {}
+      }
+    }
     renderRoomList();
   }
 
@@ -197,22 +274,28 @@
     const item = (r) => {
       const mIds = r.memberAgentIds || r.agentIds || [];
       const hasActive = mIds.some((id) => state.agents.find((ag) => ag.id === id && ag.enabled));
-      const dot = `<span class="room-presence ${hasActive ? "on" : ""}" aria-hidden="true"></span>`;
+      const dot = `<span class="room-presence ${hasActive ? "on" : ""}${r.unread ? " unread" : ""}" aria-hidden="true"></span>`;
       // Model v2: dm = privé-marker; projekt-bezug = 🗂-mini-badge
       const ico = r.kind === "dm" ? "🔒" : (r.projectId ? "🗂" : "#");
+      // Row-Subtitle (Matrix-22): Digest- Zeile, einzeilig ellipsiert
+      const sub = esc(roomSubtitle(r.id).replace(/\s+/g, " ").slice(0, 80));
+      // Unread-Dot (Matrix-3): buzz-Pattern — Zähler-Badge statt messageCount
+      const marker = r.unread ? `<span class="badge unread-badge" title="${r.unread} ungelesen">${r.unread}</span>`
+        : (r.messageCount ? `<span class="badge">${r.messageCount}</span>` : "");
       return `
       <button class="room-item ${r.id === state.currentRoomId ? "active" : ""}"
               data-room="${r.id}" data-kind="${esc(r.kind || "chat")}"
               ${r.projectId ? 'data-proj="1"' : ""} draggable="false">
         ${r.kind === "dm" ? '<span class="room-ico dm-ico">🔒</span>' : `<span class="room-ico">${r.projectId ? "🗂" : "#"}</span>`}${dot}
-        <span class="marquee" style="flex:1;min-width:0;text-align:left">
-          <span class="marquee__text">${esc(r.name)}</span>
+        <span class="room-text" style="flex:1;min-width:0;text-align:left">
+          <span class="marquee marquee__text" style="display:block">${esc(r.name)}</span>
+          <span class="room-sub" style="display:block">${sub}</span>
         </span>
         <span class="room-actions">
           <span class="room-action" data-act="rename" data-room="${r.id}" title="Umbenennen">✎</span>
           <span class="room-action" data-act="del" data-room="${r.id}" title="Löschen">🗑</span>
         </span>
-        ${r.messageCount ? `<span class="badge">${r.messageCount}</span>` : ""}
+        ${marker}
       </button>`;
     };
     const groupId = (label) => label.toLowerCase().replace(/[^a-z]/g, "");
@@ -357,6 +440,11 @@
     state.currentRoomId = id;
     state.activeTab = "chat";
     state.lastMetaKey = "";
+    // Read-Marker (Matrix-3): Öffnen markiert gelesen — Dot/Zähler erlischen
+    state.lastRead[id] = Date.now();
+    try { localStorage.setItem(`relay.lastRead.${id}`, String(state.lastRead[id])); } catch {}
+    delete state.rooms.find((r) => r.id === id)?.unread;
+    state.newBelow = 0; updateNewPill();
     renderRoomList();
     switchView("chat");
     const room = state.rooms.find((r) => r.id === id);
@@ -428,14 +516,19 @@
     const msgs = Object.values(state.messages)
       .filter((m) => m.roomId === state.currentRoomId)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-    const near = force || (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight) < 140;
+    // Follow-Scroll-Vertrag (Matrix-11, OpenClaw chat.md:723-732):
+    // "at or near the end" (48 px-Toleranz) — nur dann auto-follow.
+    // Pill zählt hier NICHT: neue Messages zählt der message.created-Handler
+    // (sonst doppelter Zähler bei jedem Re-Render).
+    const near = force || nearBottom();
     if (!msgs.length) {
       wrap.innerHTML = emptyStateHtml();
       return;
     }
     wrap.innerHTML = msgs.map((m, i) => msgHtml(m, msgs[i - 1])).join("");
     wireReactionHandlers();
-    if (near) scrollBottom(true);
+    if (near) { scrollBottom(true); state.following = true; }
+    else { state.following = false; updateNewPill(); }
   }
 
   const QUICK_REACTIONS = ["👍", "❤️", "😄", "🤔", "🔥"];
@@ -481,9 +574,27 @@
     })));
   }
 
+  // Follow-Scroll-Vertrag (Matrix-11): "at or near the end" = 48 px wie in
+  // der OpenClaw-Chat-UI (docs/gateway/protocol … chat.md:723-732)
+  function nearBottom() {
+    const wrap = $("#messages");
+    return wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 48;
+  }
+  // "N neu ↓"-Pill (Matrix-11): über dem Composer, Klick = scroll to bottom,
+  // Zähler zählt neue Frames während non-follow
+  function updateNewPill() {
+    const pill = $("#newBelowPill");
+    if (!pill) return;
+    const n = state.newBelow || 0;
+    pill.hidden = n === 0;
+    if (n) pill.textContent = `${n} neu · ↓`;
+  }
   function scrollBottom(force) {
     const wrap = $("#messages");
     wrap.scrollTop = force ? wrap.scrollHeight : wrap.scrollHeight;
+    state.following = true;
+    state.newBelow = 0;
+    updateNewPill();
   }
 
   function emptyStateHtml() {
@@ -538,6 +649,18 @@
   // ═════════════════════════════════════════════════════════════════
   const input = $("#composerInput");
   const sendBtn = $("#composerSend");
+
+  // "N neu ↓"-Pill (Matrix-11): Klick = scroll to bottom + Resync
+  $("#newBelowPill")?.addEventListener("click", () => {
+    scrollBottom(true); renderMessages(true);
+  });
+  // Scroll-Listener: manuelles Scrollen setzt following korrekt (OpenClaw-
+  // auto-follow-controller-Muster): nur Near-Bottom = following
+  $("#messages")?.addEventListener("scroll", () => {
+    const near = nearBottom();
+    state.following = near;
+    if (near && state.newBelow) { state.newBelow = 0; updateNewPill(); }
+  }, { passive: true });
 
   input.addEventListener("input", () => {
     sendBtn.disabled = !input.value.trim();
@@ -1137,6 +1260,7 @@
       state.adapters = h.adapters || ["echo"];
       $("#brandName").textContent = h.name || "Agent Relay";
     } catch { state.adapters = ["echo"]; }
+    restoreLastRead();
     await Promise.all([loadRooms(), loadAgents()]);
     if (state.rooms.length) selectRoom(state.rooms[0].id);
     connectWS();
