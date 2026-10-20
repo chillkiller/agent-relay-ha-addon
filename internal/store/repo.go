@@ -359,18 +359,19 @@ func (d *DB) GetRoom(id string) (*Room, error) {
 	if pid.Valid {
 		r.ProjectID = &pid.String
 	}
-	r.MemberAgentIDs = []string{}
-	mrows, err := d.db.Query(`SELECT agent_id FROM room_members WHERE room_id=?`, id)
-	// Codex-Befund 3: Roles im Raum-Response ausliefern (RoomRoles-Batch)
-	if roleRows, rrErr := d.db.Query(`SELECT agent_id, role FROM room_members WHERE room_id=?`, id); rrErr == nil {
-		defer roleRows.Close()
-		r.Roles = map[string]string{}
-		for roleRows.Next() {
-			var rid2, role2 string
-			if roleRows.Scan(&rid2, &role2) == nil {
-				r.Roles[rid2] = role2
+	// Codex-Befund 3: Members + Roles in EINER Query (zwei gleichzeitig
+	// offene Result Sets blockieren modernc — Timeout rc=28 bewies es).
+	r.Roles = map[string]string{}
+	mrows, gerr := d.db.Query(`SELECT agent_id, role FROM room_members WHERE room_id=?`, id)
+	if gerr == nil {
+		for mrows.Next() {
+			var aid, role string
+			if mrows.Scan(&aid, &role) == nil {
+				r.MemberAgentIDs = append(r.MemberAgentIDs, aid)
+				r.Roles[aid] = role
 			}
 		}
+		mrows.Close()
 	}
 	if err != nil {
 		return nil, err
