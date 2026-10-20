@@ -482,6 +482,10 @@
     input.value = draft;
     sendBtn.disabled = !draft.trim();
     autoGrow();
+    // Sprint-5b: document.title als Breadcrumb (Matrix-21, TDZ-safe:
+    // room wird erst unten deklariert — Lookup direkt hier)
+    const roomEarly = state.rooms.find((r) => r.id === id);
+    document.title = (roomEarly?.name ? roomEarly.name + " · " : "") + "Agent Relay";
     renderRoomList();
     switchView("chat");
     const room = state.rooms.find((r) => r.id === id);
@@ -599,6 +603,15 @@
 
   function wireReactionHandlers() {
     const wrap = $("#messages");
+    // Sprint-5c: Quick-Reaction-Buttons verdrahten (Matrix-34)
+    wrap.querySelectorAll("[data-qr]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const [mid, emoji] = b.dataset.qr.split(":");
+        try {
+          await api("POST", `/api/messages/${mid}/reactions`, { actor: "Du", emoji });
+          await loadReactions(); renderMessages();
+        } catch (err) { toast(err.message); }
+      }));
     // Sprint-3c: Hover-Aktionen verdrahten (Matrix-33)
     wrap.querySelectorAll("[data-mact]").forEach((b) =>
       b.addEventListener("click", (ev) => {
@@ -712,8 +725,14 @@
         <button class="m-action" data-mact="reply" data-x="${m.id}" title="Antworten (zitieren)">↩</button>
         ${m.senderKind === "human" ? `<button class="m-action" data-mact="edit" data-x="${m.id}" title="Bearbeiten">✎</button>` : ""}
       </span>`;
+    // Sprint-5c (Matrix-34): Quick-Reaction-Hoverbar — 4 Emojis als
+    // hover-sichtbare Buttons (opacity-0→1); ein Klick = POST+Rerender.
+    // Voll-Picker (＋) bleibt daneben.
+    const quickBar = m.senderKind === "system" ? "" :
+      `<span class="quick-rx">` + ["👍", "❤️", "🎉", "👀"].map((e) =>
+        `<button class="qr" data-qr="${m.id}:${e}" title="Reagiere ${e}">${e}</button>`).join("") + `</span>`;
     const rxBar = m.senderKind === "system" ? "" :
-      `<div class="rx-bar">${rx}<button class="rx-add" data-rxadd="${m.id}" title="Reaktion">＋</button>${actions}</div>`;
+      `<div class="rx-bar">${rx}<button class="rx-add" data-rxadd="${m.id}" title="Reaktion">＋</button>${quickBar}${actions}</div>`;
     const who = m.senderKind === "human" ? "du" : m.senderName;
     const groupFirst = !prev || prev.senderKind !== m.senderKind || prev.senderName !== m.senderName;
     const time = fmtTime(m.createdAt);
@@ -1338,6 +1357,79 @@
   // Desktop-Verhalten identisch (konsistente Navigation, kein Sackgassen-Layout).
   document.querySelectorAll(".view-back").forEach((b) =>
     b.addEventListener("click", () => switchView("chat")));
+
+
+  // ── Sprint-5a: Shortcuts (Matrix-19, buzz keyboard-shortcuts.ts) ──
+  // Escape = Raum als gelesen (unread dot erlischt); ⇧Escape = alle;
+  // Ctrl/⌘K = Suche; ? = Cheatsheet. Reihenfolge: mentionPop > modal >
+  // globale Shortcuts (nicht in Inputs fangen ausser Ctrl-K/?).
+  const SHORTCUTS = [
+    { id: "esc-read", label: "Raum als gelesen", keys: "Esc" },
+    { id: "esc-all", label: "Alle Räume als gelesen", keys: "⇧ Esc" },
+    { id: "search", label: "Chat-Suche fokussieren", keys: "Ctrl/⌘ K" },
+    { id: "help", label: "Diese Übersicht", keys: "?" },
+    { id: "nav-chat", label: "Zu den Räumen", keys: "g c" },
+    { id: "nav-agents", label: "Zu den Agents", keys: "g a" },
+    { id: "nav-projects", label: "Zu den Projekten", keys: "g p" },
+  ];
+  let gPrefix = false;
+  document.addEventListener("keydown", (ev) => {
+    // Vorrang: mention-pop (eigener handler) und offenes modal (verarbeitet
+    // Escape separat via #modal-keydown unten)
+    const modalOpen = !$("#modalWrap")?.hidden;
+    const inField = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+    // Ctrl/⌘K: auch im Input erlauben (Standard-Such-Hotkey)
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k") {
+      ev.preventDefault();
+      switchView("chat");
+      $("#searchInput")?.focus();
+      return;
+    }
+    if (modalOpen) return;
+    if (ev.key === "Escape" && !inField) {
+      if (ev.shiftKey) {
+        // alle Räume gelesen
+        for (const r of state.rooms) {
+          r.unread = 0;
+          state.lastRead[r.id] = Date.now();
+          try { localStorage.setItem(`relay.lastRead.${r.id}`, String(Date.now())); } catch {}
+        }
+        renderRoomList();
+      } else if (state.currentRoomId) {
+        const r = state.rooms.find((x) => x.id === state.currentRoomId);
+        if (r) { delete r.unread; state.lastRead[r.id] = Date.now();
+          try { localStorage.setItem(`relay.lastRead.${r.id}`, String(Date.now())); } catch {}
+        }
+        renderRoomList();
+      }
+      return;
+    }
+    if (inField) {
+      // "?" im Composer = normales Zeichen, NICHT shortcut (nur global ausserhalb Felder)
+      return;
+    }
+    // g-Prefix Navigation (buzz/gmail-Stil)
+    if (gPrefix) {
+      gPrefix = false;
+      const map = { c: "chat", a: "agents", p: "projects" };
+      const v = map[ev.key.toLowerCase()];
+      if (v) { ev.preventDefault(); switchView(v); return; }
+    }
+    if (ev.key === "g") { gPrefix = true; setTimeout(() => { gPrefix = false; }, 1200); return; }
+    if (ev.key === "?") {
+      ev.preventDefault();
+      openModal("Tastenkürzel", [], () => {});
+      // inject shortcut- list ins modal (openModal ohne Felder rendert nur form)
+      const dlg = $("#modal");
+      const list = document.createElement("div");
+      list.className = "shortcut-list";
+      list.innerHTML = SHORTCUTS.map((s) =>
+        `<div class="shortcut-row"><span>${esc(s.label)}</span><kbd>${esc(s.keys)}</kbd></div>`).join("");
+      dlg.querySelector("form").before(list);
+      // submit mit leeren feldern: modal schließt via OK/Abbrechen/Escape; ok-callback nichts tun
+      return;
+    }
+  });
 
   // quick-win 2: Chat-Suche mit live-Ergebnis-Popover
   function wireSearch() {

@@ -811,3 +811,36 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 @media (hover: none) {
   .msg-act { opacity: 1; } /* Touch: immer sichtbar (Paperclip-Konvention) */
 }
+
+/* ── Sprint-5 (Matrix-19/21/34) ─────────────────────── */
+/* Shortcut-Cheatsheet (Matrix-19, ?-Dialog) */
+.shortcut-list { padding: 4px 0 8px; display: grid; gap: 4px; }
+.shortcut-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; font-size: 12.5px; color: var(--ink-2);
+  padding: 4px 8px; border-radius: var(--r-md);
+}
+.shortcut-row:hover { background: var(--s2); }
+.shortcut-row kbd {
+  font-family: inherit; font-size: 11px; color: var(--ink-3);
+  background: var(--s3); border: 1px solid var(--line);
+  border-radius: var(--r-xs); padding: 2px 7px; white-space: nowrap;
+}
+/* Quick-Reaction-Hoverbar (Matrix-34, OpenClaw chat.md:56-75):
+   4 Emojis opacity-0 → .msg:hover sichtbar; Touch immer sichtbar */
+.quick-rx { display: inline-flex; gap: 1px; margin-left: 4px; opacity: 0; transition: opacity .12s; }
+.msg:hover .quick-rx, .msg:focus-within .quick-rx { opacity: 1; }
+.qr {
+  width: 24px; height: 24px; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-xs);
+  background: none; cursor: pointer;
+  filter: grayscale(.5); transition: filter .12s, background .12s;
+}
+.qr:hover { filter: none; background: var(--s3); transform: scale(1.08); }
+@media (hover: none) {
+  .quick-rx { opacity: 1; }
+  .qr { filter: none; }
+}
+/* rx-bar-Zeile: actions und quick-rx sitzen hinter dem ＋ (kompakt) */
+.rx-bar { align-items: center; }
