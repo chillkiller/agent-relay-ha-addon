@@ -126,6 +126,8 @@ type roomBody struct {
 	// P1#8 / P2#10-Rest:
 	Topic   string `json:"topic,omitempty"`            // Raum-Thema (buzz channel topic)
 	PinnedMessageID string `json:"pinnedMessageId,omitempty"` // pin/unpin (leer = unpin)
+	// P2#8: role je member (member endpoints)
+	Role string `json:"role,omitempty"`
 }
 
 func (s *Server) listRooms(w http.ResponseWriter, _ *http.Request) {
@@ -200,6 +202,19 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	created, _ := s.st.GetRoom(room.ID)
 	roomChanged(s)
 	writeJSON(w, 201, created)
+}
+
+func (s *Server) getRoom(w http.ResponseWriter, r *http.Request) {
+	room, err := s.st.GetRoom(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if room == nil {
+		errJSON(w, 404, "Raum nicht gefunden")
+		return
+	}
+	writeJSON(w, 200, room)
 }
 
 func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +309,27 @@ func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	roomChanged(s)
 	w.WriteHeader(204)
+}
+
+// setMemberRole (P2#8): PATCH /api/rooms/{id}/members/{agentId}/role
+func (s *Server) setMemberRole(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Role string `json:"role"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	if err := s.st.SetRoomRole(r.PathValue("id"), r.PathValue("agentId"), strings.TrimSpace(b.Role)); err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			errJSON(w, 404, "Member nicht im Raum")
+			return
+		}
+		errJSON(w, 400, err.Error())
+		return
+	}
+	roomChanged(s)
+	writeJSON(w, 200, map[string]any{"ok": true, "role": strings.TrimSpace(b.Role)})
 }
 
 func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {

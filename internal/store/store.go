@@ -219,6 +219,14 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.position alter: %w", err)
 		}
 	}
+	// P2#8 (Codex-Matrix 2.8): rollen je room-member (buzz channel_members-
+	// Idiom); v1-Vertrag: '' (default) | 'admin'.
+	if _, err := db.Exec(`ALTER TABLE room_members ADD COLUMN role TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("room_members.role alter: %w", err)
+		}
+	}
 	// P1#8 + P1#10-Rest (Codex-Matrix 1.8/2.10): Thema + Pinned-Message
 	// (buzz set_channel_topic-Idiom / pinned-messages-Idiom).
 	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN topic TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -340,6 +348,7 @@ CREATE TABLE IF NOT EXISTS rooms (
 CREATE TABLE IF NOT EXISTS room_members (
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (room_id, agent_id)
 );
 CREATE TABLE IF NOT EXISTS messages (

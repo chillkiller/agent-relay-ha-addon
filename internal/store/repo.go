@@ -786,6 +786,41 @@ func (d *DB) DeleteRoutine(id string) error {
 	return err
 }
 
+// RoomRoles (P2#8): map[agentID]→role je Raum; '' = default. UI + künftige
+// Agent-Gewichtung; 1 Query.
+func (d *DB) RoomRoles(roomID string) (map[string]string, error) {
+	rows, err := d.db.Query(`SELECT agent_id, role FROM room_members WHERE room_id=?`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var aid, role string
+		if err := rows.Scan(&aid, &role); err != nil {
+			return nil, err
+		}
+		out[aid] = role
+	}
+	return out, rows.Err()
+}
+
+// SetRoomRole: role setzen/leeren (UPSERT-artig über UPDATE nur).
+func (d *DB) SetRoomRole(roomID, agentID, role string) error {
+	if role != "" && role != "admin" {
+		return fmt.Errorf("ungültige Rolle %q (nur ''|admin)", role)
+	}
+	res, err := d.db.Exec(`UPDATE room_members SET role=? WHERE room_id=? AND agent_id=?`, role, roomID, agentID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // ── skills (P2#3, paperclip company-skills) ─────────────────────────
 
 func skillCols(r rowScanner) (*Skill, error) {

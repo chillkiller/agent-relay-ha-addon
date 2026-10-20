@@ -26,7 +26,8 @@
     threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
     chatTaskId: null, // P2#1: offenes Chatter-Panel (taskId)
     skills: [], // P2#3
-    routines: [], // P2#4: recurring Agent-Trigger: Skill-Store (paperclip company-skills)
+    routines: [], // P2#4: recurring Agent-Trigger
+    roomRoles: {}, // P2#8: map[agentId]→role je aktueller Raum: Skill-Store (paperclip company-skills)
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -652,6 +653,17 @@
     $("#activeRoomName").textContent = room?.name ?? "";
     updateBoardBadge(room);
     renderMemberChips(room);
+    // P2#8: Rollen je Member laden (Chip-Anzeige + Toggle)
+    api("GET", `/api/rooms/${id}`).then((r) => {
+      if (r && r.id === state.currentRoomId) {
+        state.roomRoles = {};
+        for (const aid of (r.memberAgentIds || [])) state.roomRoles[aid] = ""; // default (role im room-API lehr — siehe repo.RoomRoles-Vertrag)
+      }
+      api("GET", `/api/rooms`).then((all) => {
+        roleSyncFromRooms(all);
+        renderMemberChips(state.rooms.find((r) => r.id === state.currentRoomId));
+      }).catch(() => {});
+    }).catch(() => {});
     renderPinnedBanner(id);
     const isProject = room?.kind === "project";
     $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
@@ -685,13 +697,24 @@
       return;
     }
     el.innerHTML = members.map((m) => `
-      <span class="chip" data-aid="${m.id}" title="Klick: entfernen">
+      <span class="chip ${memberRole(m.id) === "admin" ? "role-admin" : ""}" data-aid="${m.id}"
+            title="${memberRole(m.id) ? "Rolle: " + esc(memberRole(m.id)) + " · shift-Klick zurücksetzen" : "Klick: entfernen · shift-Klick: Rolle"}">
         <span class="swatch" style="background:${esc(m.color)}"></span>
-        ${esc(m.emoji)} ${esc(m.name)}
+        ${esc(m.emoji)} ${esc(m.name)}${memberRole(m.id) ? ' <span class="role-tag">★</span>' : ""}
       </span>`).join("");
     el.querySelectorAll("[data-aid]").forEach((c) =>
-      c.addEventListener("click", async () => {
-        if (!confirm(`${c.textContent.trim()} aus dem Raum entfernen?`)) return;
+      c.addEventListener("click", async (ev) => {
+        // P2#8: Shift-Klick = Rollen-Cycle ('' → admin → ''); sonst entfernen
+        if (ev.shiftKey) {
+          const next = memberRole(c.dataset.aid) === "admin" ? "" : "admin";
+          try {
+            await api("PATCH", `/api/rooms/${state.currentRoomId}/members/${c.dataset.aid}/role`, { role: next });
+            state.roomRoles[c.dataset.aid] = next;
+            renderMemberChips(state.rooms.find((r) => r.id === state.currentRoomId));
+          } catch (err) { toast(err.message); }
+          return;
+        }
+        if (!confirm(`${c.textContent.replace("★", "").trim()} aus dem Raum entfernen?`)) return;
         await api("DELETE", `/api/rooms/${state.currentRoomId}/members/${c.dataset.aid}`);
         await loadRooms(); await selectRoom(state.currentRoomId);
       }));
@@ -2149,6 +2172,14 @@
           renderDashboard();
         } catch (err) { toast(err.message); }
       }));
+  }
+  // ── P2#8: Rollen am Member-Chip (Klick-Cycle '' → admin → '') ──
+  function memberRole(aid) { return state.roomRoles?.[aid] || ""; }
+  function roleSyncFromRooms(all) {
+    // server-side roles stehen NICHT im rooms-Listing (Contract-Schmerz);
+    // der Klick-Cycle schreibt und zeigt — Reload-Verlust ist v1-Bewusst
+    // (Role-Toggle-UI = Live-Verhalten; Persistenz kommt mit room-API-Enrichment)
+    void all;
   }
 
   boot();

@@ -979,3 +979,6 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 .dp-nums { color: var(--ink-3); font-size: 11px; }
 .dp-open { color: var(--warn); font-size: 11px; }
 .dp-ok { color: var(--ok); font-size: 11px; }
+
+.chip.role-admin { border-color: var(--warn); }
+.role-tag { color: var(--warn); font-size: 10px; margin-left: 2px; }
