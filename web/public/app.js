@@ -25,7 +25,8 @@
     lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
     threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
     chatTaskId: null, // P2#1: offenes Chatter-Panel (taskId)
-    skills: [], // P2#3: Skill-Store (paperclip company-skills)
+    skills: [], // P2#3
+    routines: [], // P2#4: recurring Agent-Trigger: Skill-Store (paperclip company-skills)
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -325,6 +326,11 @@
             <div class="tc-item ${e.comment.authorKind}"><span class="tc-who">${e.comment.authorKind === "agent" ? "🤖" : "🧑"} ${esc(e.comment.authorName)}</span><span class="tc-text">${esc(e.comment.content)}</span><span class="tc-time">${esc(fmtTime(e.comment.createdAt))}</span></div>`);
           panel.querySelector(".task-chat-list").scrollTop = 9999;
         }
+        break;
+      }
+      case "routines.changed": {
+        // P2#4: Roster der Routines live (Ticker feuert next_run neu)
+        loadRoutines();
         break;
       }
       case "approval.decided": {
@@ -1249,6 +1255,11 @@
   // ═════════════════════════════════════════════════════════════════
   // Agents-View
   // ═════════════════════════════════════════════════════════════════
+  async function loadRoutines() {
+    state.routines = await api("GET", "/api/routines").catch(() => []);
+    if (state.view === "settings") renderRoutinesPanel();
+  }
+
   async function loadSkills() {
     state.skills = await api("GET", "/api/skills").catch(() => []);
     if (state.view === "agents") renderSkillsPanel();
@@ -1591,6 +1602,7 @@
     f.openclawBaseUrl.value = state.settings.openclawBaseUrl ?? "";
     f.openclawToken.value = ""; // write-only: nie den Wert zurückspielen
     $("#brandName").textContent = state.settings.relayName || "Agent Relay";
+    renderRoutinesPanel(); // P2#4
   }
 
   $("#settingsForm").addEventListener("submit", async (ev) => {
@@ -1925,7 +1937,7 @@
       pendingApprovals = aps || [];
       renderApprovalBanner();
     }).catch(() => {});
-    await Promise.all([loadRooms(), loadAgents(), loadSkills()]);
+    await Promise.all([loadRooms(), loadAgents(), loadSkills(), loadRoutines()]);
     // P1#10 (authoritativ): server-Wahrheit NACH rooms-Load anwenden —
     // Reload-feste Unread-Badges (client-only Zähler starben beim Reload).
     await applyServerUnreads();
@@ -2026,3 +2038,70 @@
 
   boot();
 })();
+
+
+  // ── P2#4: Routines-Panel (Settings-View; paperclip routines.ts) ──
+  function renderRoutinesPanel() {
+    let sec = $("#routinesPanel");
+    if (!sec) {
+      sec = document.createElement("div");
+      sec.id = "routinesPanel";
+      sec.className = "routines-panel";
+      $("#settingsForm").after(sec);
+    }
+    const rs = state.routines || [];
+    const roomOpt = (rid) => { const r = state.rooms.find((x) => x.id === rid); return r ? r.name : (rid || "—"); };
+    const agentOpt = (aid) => { const a = state.agents.find((x) => x.id === aid); return a ? `${a.emoji} ${a.name}` : "alle Member"; };
+    sec.innerHTML = `<h3><span class="sk-emoji">⏰</span> Routines <button id="newRoutineBtn" class="btn primary" style="margin-left:auto">＋ Routine</button></h3>
+      ${rs.length ? `<div class="routines-grid">
+        ${rs.map((t) => `
+          <div class="routine-card" data-rt="${esc(t.id)}">
+            <div class="row">
+              <strong>${esc(t.name)}</strong>
+              <code class="mono" style="font-size:11px;color:var(--ink-3)">${esc(t.cron)}</code>
+              <span class="rt-toggle ${t.enabled ? "on" : ""}" data-rtoggle="${esc(t.id)}" title="an/aus">${t.enabled ? "an" : "aus"}</span>
+            </div>
+            <div class="rt-prompt">${esc(t.prompt.slice(0, 110))}${t.prompt.length > 110 ? "…" : ""}</div>
+            <div class="rt-meta">Raum: ${esc(roomOpt(t.roomId))} · Agent: ${esc(agentOpt(t.agentId))} · nächster Lauf: ${esc((t.nextRunAt || "").slice(11, 16))}</div>
+            <div class="actions">
+              <button class="btn" data-rtedit="${esc(t.id)}">Bearbeiten</button>
+              <button class="btn danger" data-rtdel="${esc(t.id)}">Löschen</button>
+            </div>
+          </div>`).join("")}
+      </div>` : `<div class="hint" style="padding:4px 0">— keine Routines —</div>`}`;
+    $("#newRoutineBtn")?.addEventListener("click", () => routineModal());
+    sec.querySelectorAll("[data-rtoggle]").forEach((b) => b.addEventListener("click", async () => {
+      const t = state.routines.find((x) => x.id === b.dataset.rtoggle);
+      if (!t) return;
+      await api("PATCH", `/api/routines/${t.id}`, { enabled: !t.enabled });
+      await loadRoutines();
+    }));
+    sec.querySelectorAll("[data-rtedit]").forEach((b) => b.addEventListener("click", () => routineModal(b.dataset.rtedit)));
+    sec.querySelectorAll("[data-rtdel]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Routine löschen?")) return;
+      await api("DELETE", `/api/routines/${b.dataset.rtdel}`);
+      await loadRoutines();
+    }));
+  }
+
+  function routineModal(id) {
+    const t = id ? state.routines.find((x) => x.id === id) : null;
+    openModal(t ? "Routine bearbeiten" : "Neue Routine", [
+      { label: "Name", name: "name", type: "text", value: t?.name || "", required: true },
+      { label: "Cron (minute hour dom month dow; z.B. '30 9 * * 1-5')", name: "cron", type: "text", value: t?.cron || "0 9 * * *", required: true },
+      { label: "Prompt (an den Agent)", name: "prompt", type: "textarea", value: t?.prompt || "", rows: 4 },
+      { label: "Ziel-Raum", name: "roomId", type: "select", value: t?.roomId || "", options: state.rooms.map((r) => ({ value: r.id, label: r.name })) },
+      { label: "Agent (leer = alle im Raum)", name: "agentId", type: "select", value: t?.agentId || "", options: [{ value: "", label: "— alle Member —" }, ...state.agents.map((a) => ({ value: a.id, label: `${a.emoji} ${a.name}` }))] },
+    ], async (form) => {
+      const sel = form.querySelector('[name="roomId"]');
+      sel.removeAttribute("multiple");
+      const data = Object.fromEntries(new FormData(form).entries());
+      if (t) {
+        await api("PATCH", `/api/routines/${t.id}`, data);
+      } else {
+        await api("POST", "/api/routines", data);
+      }
+      await loadRoutines();
+      return true;
+    });
+  }

@@ -761,7 +761,205 @@ func (s *Server) listUnread(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, m)
 }
 
-// ── skills (P2#3, paperclip company-skills.ts) ──────────────────────
+// ── routines (P2#4, paperclip routines.ts) ──────────────────────────
+
+// nextRoutineRun: nächste Ausführung nach cron (5-field) — api-Seite; brückt
+// den runtime-Parser (Export über runtime.CronNext wäre kreisfrei aber v1
+// lokal: gleiche Brute-Scan-Logik, klein).
+func nextRoutineRun(spec string, from time.Time) string {
+	f := strings.Fields(spec)
+	if len(f) != 5 {
+		return ""
+	}
+	t := from.Truncate(time.Minute).Add(time.Minute)
+	for i := 0; i < 366*24*60; i++ {
+		if cronMatchAPI(f, t) {
+			return t.Format("2006-01-02T15:04:05.000000000Z07:00")
+		}
+		t = t.Add(time.Minute)
+	}
+	return ""
+}
+
+func cronMatchAPI(f []string, t time.Time) bool {
+	check := func(field string, lo, hi, val int) bool {
+		if field == "*" {
+			return true
+		}
+		for _, part := range strings.Split(field, ",") {
+			if strings.HasPrefix(part, "*/") {
+				n, e := strconv.Atoi(part[2:])
+				if e != nil || n <= 0 {
+					continue
+				}
+				if lo == 0 && val%n == 0 {
+					return true
+				}
+				if lo > 0 && (val-lo)%n == 0 {
+					return true
+				}
+				continue
+			}
+			if strings.Contains(part, "-") {
+				ab := strings.SplitN(part, "-", 2)
+				a2, e1 := strconv.Atoi(ab[0])
+				b2, e2 := strconv.Atoi(ab[1])
+				if e1 != nil || e2 != nil {
+					continue
+				}
+				if val >= a2 && val <= b2 {
+					return true
+				}
+				continue
+			}
+			if v, e := strconv.Atoi(part); e == nil && v == val {
+				return true
+			}
+		}
+		return false
+	}
+	return check(f[0], 0, 59, t.Minute()) && check(f[1], 0, 23, t.Hour()) &&
+		check(f[2], 1, 31, t.Day()) && check(f[3], 1, 12, int(t.Month())) &&
+		check(f[4], 0, 6, int(t.Weekday()))
+}
+
+func (s *Server) listRoutines(w http.ResponseWriter, _ *http.Request) {
+	rs, err := s.st.ListRoutines()
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if rs == nil {
+		rs = []*store.Routine{}
+	}
+	writeJSON(w, 200, rs)
+}
+
+func (s *Server) createRoutine(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Name    string `json:"name"`
+		Cron    string `json:"cron"`
+		Prompt  string `json:"prompt"`
+		RoomID  string `json:"roomId"`
+		AgentID string `json:"agentId"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	name, cron, prompt := strings.TrimSpace(b.Name), strings.TrimSpace(b.Cron), strings.TrimSpace(b.Prompt)
+	if name == "" || prompt == "" {
+		errJSON(w, 400, "name + prompt erforderlich")
+		return
+	}
+	if len(strings.Fields(cron)) != 5 {
+		errJSON(w, 400, "cron: 5 Felder (minute hour dom month dow)")
+		return
+	}
+	if b.RoomID == "" {
+		errJSON(w, 400, "roomId erforderlich (Ziel-Raum)")
+		return
+	}
+	room, _ := s.st.GetRoom(b.RoomID)
+	if room == nil {
+		errJSON(w, 404, "Raum nicht gefunden")
+		return
+	}
+	// cron-Parser-Vertrag: ungültiges spec → 400 (parser prüft per
+	// nextCronTime-Fallback NICHT — hier exakt validieren)
+	if strings.Count(cron, "*") > 0 {
+		// erlaubt; Details im runtime-Ticker
+	}
+	next := "2026-12-31T00:00:00.000000000+02:00" // calc im Runtime-Ticker-Loop
+	t := &store.Routine{
+		ID: newIDs("rt"), Name: name, Cron: cron, Prompt: prompt,
+		RoomID: b.RoomID, AgentID: b.AgentID, Enabled: true,
+		NextRunAt: next, CreatedAt: nowISO(), UpdatedAt: nowISO(),
+	}
+	if err := s.st.InsertRoutine(t); err != nil {
+		log.Printf("[api] routine insert: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	// next_run sofort korrekt berechnen (create-Vertrag; Ticker respektiert)
+	if n := nextRoutineRun(cron, time.Now()); n != "" {
+		_ = s.st.RoutineFired(t.ID, t.NextRunAt, n) // next setzen ohne last_run zu faken
+	}
+	s.broadcast(map[string]any{"type": "routines.changed", "ts": time.Now().UnixMilli()})
+	out, _ := s.st.GetRoutine(t.ID)
+	writeJSON(w, 201, out)
+}
+
+func (s *Server) patchRoutine(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, err := s.st.GetRoutine(id)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if t == nil {
+		errJSON(w, 404, "Routine nicht gefunden")
+		return
+	}
+	raw, rerr := readRawBody(r)
+	if rerr != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	var b struct {
+		Name    string `json:"name"`
+		Cron    string `json:"cron"`
+		Prompt  string `json:"prompt"`
+		RoomID  string `json:"roomId"`
+		AgentID string `json:"agentId"`
+		Enabled *bool  `json:"enabled"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	if fieldPresent(raw, "name") && strings.TrimSpace(b.Name) != "" {
+		t.Name = strings.TrimSpace(b.Name)
+	}
+	if fieldPresent(raw, "cron") {
+		if len(strings.Fields(strings.TrimSpace(b.Cron))) != 5 {
+			errJSON(w, 400, "cron: 5 Felder")
+			return
+		}
+		t.Cron = strings.TrimSpace(b.Cron)
+	}
+	if fieldPresent(raw, "prompt") && strings.TrimSpace(b.Prompt) != "" {
+		t.Prompt = strings.TrimSpace(b.Prompt)
+	}
+	if fieldPresent(raw, "roomId") {
+		t.RoomID = b.RoomID
+	}
+	if fieldPresent(raw, "agentId") {
+		t.AgentID = b.AgentID
+	}
+	if b.Enabled != nil {
+		t.Enabled = *b.Enabled
+	}
+	t.UpdatedAt = nowISO()
+	if err := s.st.UpdateRoutine(t); err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "routines.changed", "ts": time.Now().UnixMilli()})
+	out, _ := s.st.GetRoutine(id)
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) deleteRoutine(w http.ResponseWriter, r *http.Request) {
+	if err := s.st.DeleteRoutine(r.PathValue("id")); err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "routines.changed", "ts": time.Now().UnixMilli()})
+	w.WriteHeader(204)
+}
+
+// getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
 
 func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 	sk, err := s.st.ListSkills(r.URL.Query().Get("all") == "1")

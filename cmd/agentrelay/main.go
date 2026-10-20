@@ -56,6 +56,7 @@ func main() {
 		log.Println("[relay] API bearer gate enabled (RELAY_BEARER_TOKEN)")
 	}
 
+	rt.StartRoutines()
 	apiHandler := srv.Handler()
 	spaHandler := webpkg.SPA(nil)
 

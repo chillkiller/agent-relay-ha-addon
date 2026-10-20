@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +82,169 @@ func (r *Runtime) AdapterIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// ── routines (P2#4): cron 5-field parser + 60s-Ticker ───────────────
+
+// parseCronField: * | */n | a,b,c | a-b → matches? (min/max je Feld)
+func parseCronField(field string, lo, hi int, val int) bool {
+	if field == "*" {
+		return true
+	}
+	for _, part := range strings.Split(field, ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "*/") {
+			n, err := strconv.Atoi(part[2:])
+			if err != nil || n <= 0 {
+				continue
+			}
+			if val%lo == 0 { // */n relativ zur Feld-0-Basis (hour/dom/month: Basis 0)
+				// hour: 0-basiert; day/month: 1-basiert mit Offset
+				if lo == 0 && val%n == 0 {
+					return true
+				}
+				if lo > 0 && (val-lo)%n == 0 {
+					return true
+				}
+			}
+			continue
+		}
+		if strings.Contains(part, "-") {
+			ab := strings.SplitN(part, "-", 2)
+			a2, e1 := strconv.Atoi(ab[0])
+			b2, e2 := strconv.Atoi(ab[1])
+			if e1 != nil || e2 != nil {
+				continue
+			}
+			if val >= a2 && val <= b2 {
+				return true
+			}
+			continue
+		}
+		if v, err := strconv.Atoi(part); err == nil && v == val {
+			return true
+		}
+	}
+	return false
+}
+
+// cronMatches: minute hour dom month dow (lokale Zeit des Servers).
+func cronMatches(spec string, at time.Time) bool {
+	f := strings.Fields(strings.TrimSpace(spec))
+	if len(f) != 5 {
+		return false
+	}
+	minute, _ := strconv.Atoi(f[0])
+	_ = minute
+	if !parseCronField(f[0], 0, 59, at.Minute()) {
+		return false
+	}
+	if !parseCronField(f[1], 0, 23, at.Hour()) {
+		return false
+	}
+	if !parseCronField(f[2], 1, 31, at.Day()) {
+		return false
+	}
+	if !parseCronField(f[3], 1, 12, int(at.Month())) {
+		return false
+	}
+	if !parseCronField(f[4], 0, 6, int(at.Weekday())) {
+		return false
+	}
+	return true
+}
+
+// nextCronTime: nächste Ausführungszeit nach spec (Brute-Scan ≤ 1 Jahr
+// minute-genau; korrekt für v1-Formen).
+func nextCronTime(spec string, from time.Time) string {
+	t := from.Truncate(time.Minute).Add(time.Minute)
+	for i := 0; i < 366*24*60; i++ { // max 1 Jahr Minuten
+		if cronMatches(spec, t) {
+			return t.Format("2006-01-02T15:04:05.000000000Z07:00")
+		}
+		t = t.Add(time.Minute)
+	}
+	return from.Add(24 * time.Hour).Format("2006-01-02T15:04:05.000000000Z07:00")
+}
+
+// startRoutineTicker: 60 s-Tick — fällige Feuern als User-Post mit Prompt
+// (Mention-Pfad; Agent-Antworten laufen über die normale enqueueTurn-Kette).
+// StartRoutines: public Einstieg (main.go ruft es nach Runtime-Start).
+func (r *Runtime) StartRoutines() {
+	r.startRoutineTicker()
+}
+
+func (r *Runtime) startRoutineTicker() {
+	go func() {
+		tick := time.NewTicker(60 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-r.stop:
+				return
+			case <-tick.C:
+				now := time.Now()
+				nowISO := now.Format("2006-01-02T15:04:05.000000000Z07:00")
+				due, err := r.st.DueRoutines(nowISO)
+				if err != nil {
+					continue
+				}
+				for _, t := range due {
+					room := t.RoomID
+					if room == "" {
+						continue
+					}
+					prompt := t.Prompt
+					if t.AgentID != "" {
+						if ag, err := r.st.GetAgent(t.AgentID); err == nil && ag != nil {
+							prompt = "@" + ag.Name + " " + prompt
+						}
+					}
+					m := &store.Message{
+						ID:         store.NewID("msg"),
+						RoomID:     room,
+						SenderName: "Routine",
+						SenderKind: "system",
+						Content:    "⏰ " + t.Name + ": " + prompt,
+						Status:     "complete",
+						CreatedAt:  nowISO,
+						UpdatedAt:  nowISO,
+					}
+					if err := r.st.InsertMessage(m); err != nil {
+						continue
+					}
+					r.publish("message.created", map[string]any{"message": m})
+					// Agent-Turn mit Routine-Message (ParentID = System-Route:
+					// die Routine-Message läuft als User-Ersatz)
+					userMsg := m
+					go func(t2 *store.Routine) {
+						if t2.AgentID != "" {
+							if ag, err := r.st.GetAgent(t2.AgentID); err == nil && ag != nil {
+								r.enqueueTurn(ag, userMsg)
+							}
+						} else {
+							// kein Agent-Pin: alle Raum-Members (OnUserMessage-Pfad)
+							agents, _ := r.st.RoomAgents(room)
+							for i, ag2 := range agents {
+								ag3 := ag2
+								delay := time.Duration(i) * 900 * time.Millisecond
+								go func() {
+									select {
+									case <-time.After(delay):
+									case <-r.stop:
+										return
+									}
+									r.enqueueTurn(ag3, userMsg)
+								}()
+							}
+						}
+					}(t)
+					next := nextCronTime(t.Cron, now)
+					_ = r.st.RoutineFired(t.ID, nowISO, next)
+				}
+			}
+		}
+	}()
 }
 
 // ResumeApproval (P2#2): Freigabe re-enqueued den Original-Turn —

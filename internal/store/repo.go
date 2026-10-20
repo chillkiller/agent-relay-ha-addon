@@ -693,6 +693,99 @@ func (d *DB) ListTaskComments(taskID string) ([]*TaskComment, error) {
 	return out, rows.Err()
 }
 
+// ── routines (P2#4, paperclip routines.ts) ──────────────────────────
+
+func scanRoutine(row rowScanner) (*Routine, error) {
+	t := &Routine{}
+	var lastRun sql.NullString
+	var roomID, agentID sql.NullString
+	if err := row.Scan(&t.ID, &t.Name, &t.Cron, &t.Prompt, &roomID, &agentID, &t.Enabled, &t.NextRunAt, &lastRun, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return nil, err
+	}
+	t.RoomID = roomID.String
+	t.AgentID = agentID.String
+	t.LastRunAt = lastRun.String
+	return t, nil
+}
+
+func (d *DB) ListRoutines() ([]*Routine, error) {
+	rows, err := d.db.Query(`SELECT id,name,cron,prompt,room_id,agent_id,enabled,next_run_at,last_run_at,created_at,updated_at FROM routines ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Routine
+	for rows.Next() {
+		t, err := scanRoutine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) DueRoutines(nowISO string) ([]*Routine, error) {
+	rows, err := d.db.Query(`SELECT id,name,cron,prompt,room_id,agent_id,enabled,next_run_at,last_run_at,created_at,updated_at
+		FROM routines WHERE enabled=1 AND next_run_at <= ?`, nowISO)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Routine
+	for rows.Next() {
+		t, err := scanRoutine(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetRoutine(id string) (*Routine, error) {
+	row := d.db.QueryRow(`SELECT id,name,cron,prompt,room_id,agent_id,enabled,next_run_at,last_run_at,created_at,updated_at FROM routines WHERE id=?`, id)
+	t, err := scanRoutine(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return t, err
+}
+
+func (d *DB) InsertRoutine(t *Routine) error {
+	_, err := d.db.Exec(`INSERT INTO routines (id,name,cron,prompt,room_id,agent_id,enabled,next_run_at,last_run_at,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,NULL,?,?)`,
+		t.ID, t.Name, t.Cron, t.Prompt, nullable(t.RoomID), nullable(t.AgentID), boolInt(t.Enabled), t.NextRunAt, t.CreatedAt, t.UpdatedAt)
+	return err
+}
+
+// UpdateRoutine: Feld-scharf (name/cron/prompt/room/agent/enabled); next_run
+// NICHT via Update — neu berechnet vom cron-Parser (Tick).
+func (d *DB) UpdateRoutine(t *Routine) error {
+	var roomID, agentID any
+	if t.RoomID != "" {
+		roomID = t.RoomID
+	}
+	if t.AgentID != "" {
+		agentID = t.AgentID
+	}
+	_, err := d.db.Exec(`UPDATE routines SET name=?,cron=?,prompt=?,room_id=?,agent_id=?,enabled=?,updated_at=? WHERE id=?`,
+		t.Name, t.Cron, t.Prompt, roomID, agentID, boolInt(t.Enabled), now(), t.ID)
+	return err
+}
+
+// RoutineFired: last_run setzen + next_run vom cron weiterrechnen (Tick).
+func (d *DB) RoutineFired(id, nowISO, nextRunAt string) error {
+	_, err := d.db.Exec(`UPDATE routines SET last_run_at=?, next_run_at=?, updated_at=? WHERE id=?`,
+		nowISO, nextRunAt, now(), id)
+	return err
+}
+
+func (d *DB) DeleteRoutine(id string) error {
+	_, err := d.db.Exec(`DELETE FROM routines WHERE id=?`, id)
+	return err
+}
+
 // ── skills (P2#3, paperclip company-skills) ─────────────────────────
 
 func skillCols(r rowScanner) (*Skill, error) {

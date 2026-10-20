@@ -104,6 +104,20 @@ type RoomRead struct {
 	LastReadAt string `json:"lastReadAt"`
 }
 
+type Routine struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Cron      string `json:"cron"`
+	Prompt    string `json:"prompt"`
+	RoomID    string `json:"roomId"`
+	AgentID   string `json:"agentId"`
+	Enabled   bool   `json:"enabled"`
+	NextRunAt string `json:"nextRunAt"`
+	LastRunAt string `json:"lastRunAt,omitempty"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 type TaskComment struct {
 	ID        string `json:"id"`
 	TaskID    string `json:"taskId"`
@@ -389,6 +403,22 @@ CREATE TABLE IF NOT EXISTS approvals (
   consumed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_pending ON approvals(status, created_at);
+-- Routines (P2#4, Codex-Matrix 2.4, paperclip routines.ts): recurring
+-- Agent-Trigger — cron 5-field (v1: minute hour dom month dow, *-Felder,
+-- Kommas/Step */n); feuern als User-Post mit Prompt in Ziel-Raum.
+CREATE TABLE IF NOT EXISTS routines (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  cron TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  room_id TEXT REFERENCES rooms(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT NOT NULL,
+  last_run_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 -- Skills (P2#3, Codex-Matrix 2.3, paperclip company-skills.ts): ver-
 -- sionierbare Instruction-Bausteine; parent_id = Vorgänger-Version
 -- (Restore-Kette), deleted_at = soft-delete (Paperclip: Version History).

@@ -952,3 +952,14 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 .skill-card .desc { color: var(--ink-3); min-height: 32px; }
 .skill-card .sk-agents { color: var(--ink-4); font-size: 11.5px; }
 .skill-card .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ── P2#4 Routines ─────────────────────────────────── */
+.routines-panel { padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--line); margin-top: var(--sp-4); }
+.routines-panel h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 0 0 10px; }
+.routines-grid { display: grid; gap: 8px; }
+.routine-card { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.routine-card .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rt-toggle { margin-left: auto; font-size: 11px; color: var(--ink-4); cursor: pointer; padding: 2px 10px; border-radius: var(--r-pill); border: 1px solid var(--line); }
+.rt-toggle.on { color: var(--ok); border-color: var(--ok); }
+.rt-prompt { color: var(--ink-2); }
+.rt-meta { color: var(--ink-4); font-size: 11.5px; }
