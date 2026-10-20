@@ -231,6 +231,15 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		BaseURL:      a.BaseURL,
 		APIKey:       a.APIKey,
 	}
+	// P2#3: gebundene Skills als Systemprompt-Anhang (Paperclip-Muster:
+	// agent-skills hängen an Agents; Instructions = wiederverwendbare Blöcke)
+	if skills, err := r.st.AgentsSkills(a.ID); err == nil && len(skills) > 0 {
+		extra := "\n\n# Gebundene Skills\n"
+		for _, sk := range skills {
+			extra += fmt.Sprintf("\n## %s (v%d)\n%s\n", sk.Name, sk.Version, sk.Instructions)
+		}
+		cfg.SystemPrompt += extra
+	}
 	if cfg.BaseURL == "" {
 		settings := r.st.GetSettings()
 		sv, _ := settings["openclawBaseUrl"].(string)

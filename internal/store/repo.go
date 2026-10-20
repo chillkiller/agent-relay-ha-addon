@@ -693,6 +693,195 @@ func (d *DB) ListTaskComments(taskID string) ([]*TaskComment, error) {
 	return out, rows.Err()
 }
 
+// ── skills (P2#3, paperclip company-skills) ─────────────────────────
+
+func skillCols(r rowScanner) (*Skill, error) {
+	sk := &Skill{}
+	var parent, deleted sql.NullString
+	if err := r.Scan(&sk.ID, &sk.Name, &sk.Instructions, &sk.Version, &parent, &deleted, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if parent.Valid {
+		sk.ParentID = &parent.String
+	}
+	sk.DeletedAt = deleted.String
+	return sk, nil
+}
+
+const skillSelect = `SELECT id,name,instructions,version,parent_id,deleted_at,created_at,updated_at FROM skills`
+
+// ListSkills: deleted=false → nur lebende; true → alle inkl. Versionen.
+func (d *DB) ListSkills(includeDeleted bool) ([]*Skill, error) {
+	q := skillSelect
+	if !includeDeleted {
+		q += ` WHERE deleted_at IS NULL`
+	}
+	q += ` ORDER BY name, version DESC`
+	rows, err := d.db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Skill
+	for rows.Next() {
+		sk, err := skillCols(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sk)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	d.enrichSkillAgents(out)
+	return out, nil
+}
+
+func (d *DB) GetSkill(id string) (*Skill, error) {
+	row := d.db.QueryRow(skillSelect+` WHERE id=?`, id)
+	sk, err := skillCols(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.enrichSkillAgents([]*Skill{sk})
+	return sk, nil
+}
+
+// InsertSkill: Version übernehmen (create=1; update schreibt NEUE row mit
+// version+1 und parent_id=alt — Paperclip Version-History-Muster).
+func (d *DB) InsertSkill(sk *Skill) error {
+	var parent any
+	if sk.ParentID != nil && *sk.ParentID != "" {
+		parent = *sk.ParentID
+	}
+	_, err := d.db.Exec(`INSERT INTO skills (id,name,instructions,version,parent_id,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?,NULL,?,?)`,
+		sk.ID, sk.Name, sk.Instructions, sk.Version, parent, sk.CreatedAt, sk.UpdatedAt)
+	return err
+}
+
+// UpdateSkill: neue Version-Row anlegen (alt bleibt — Restore-Kette).
+func (d *DB) UpdateSkill(skill *Skill) (string, error) {
+	old, err := d.GetSkill(skill.ID)
+	if err != nil || old == nil {
+		return "", fmt.Errorf("skill %s nicht gefunden", skill.ID)
+	}
+	neu := &Skill{
+		ID:          NewID("skill"),
+		Name:        skill.Name,
+		Instructions: skill.Instructions,
+		Version:     old.Version + 1,
+		ParentID:    &old.ID,
+		CreatedAt:   now(),
+		UpdatedAt:   now(),
+	}
+	if err := d.InsertSkill(neu); err != nil {
+		return "", err
+	}
+	ids, err := d.SkillAgents(old.ID)
+	if err != nil {
+		return neu.ID, err
+	}
+	for _, aid := range ids {
+		_ = d.AssignSkill(neu.ID, aid)
+	}
+	return neu.ID, nil
+}
+
+// DeleteSkill: soft-delete (Paperclip: Versionen bleiben restorebar).
+func (d *DB) DeleteSkill(id string) error {
+	_, err := d.db.Exec(`UPDATE skills SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, now(), id)
+	return err
+}
+
+// RestoreSkill: soft-deleted row zurückholen (Version bleibt).
+func (d *DB) RestoreSkill(id string) error {
+	_, err := d.db.Exec(`UPDATE skills SET deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL`, id)
+	return err
+}
+
+// AssignSkill / UnassignSkill: Bindungen (M:N).
+func (d *DB) AssignSkill(skillID, agentID string) error {
+	_, err := d.db.Exec(`INSERT OR IGNORE INTO skill_assignments (skill_id,agent_id) VALUES (?,?)`, skillID, agentID)
+	return err
+}
+
+func (d *DB) UnassignSkill(skillID, agentID string) error {
+	_, err := d.db.Exec(`DELETE FROM skill_assignments WHERE skill_id=? AND agent_id=?`, skillID, agentID)
+	return err
+}
+
+// SkillAgents: Gebundene Agent-IDs je Skill.
+func (d *DB) SkillAgents(skillID string) ([]string, error) {
+	rows, err := d.db.Query(`SELECT agent_id FROM skill_assignments WHERE skill_id=?`, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var aid string
+		if err := rows.Scan(&aid); err != nil {
+			return nil, err
+		}
+		out = append(out, aid)
+	}
+	return out, rows.Err()
+}
+
+// enrichSkillAgents: Agent-Bindungen je Batch anhängen (kein N+1).
+func (d *DB) enrichSkillAgents(skills []*Skill) {
+	if len(skills) == 0 {
+		return
+	}
+	ids := make([]string, len(skills))
+	byID := map[string]*Skill{}
+	for i, sk := range skills {
+		ids[i] = sk.ID
+		byID[sk.ID] = sk
+	}
+	q := `SELECT skill_id,agent_id FROM skill_assignments WHERE skill_id IN (` + strings.Repeat("?,", len(ids)-1) + `?)`
+	args := make([]any, len(ids))
+	for i, v := range ids {
+		args[i] = v
+	}
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sid, aid string
+		if err := rows.Scan(&sid, &aid); err != nil {
+			continue
+		}
+		if sk := byID[sid]; sk != nil {
+			sk.AgentIDs = append(sk.AgentIDs, aid)
+		}
+	}
+}
+
+// AgentsSkills: gebundene Skills je Agent (Runtime-Systemprompt-Erweiterung).
+func (d *DB) AgentsSkills(agentID string) ([]*Skill, error) {
+	rows, err := d.db.Query(skillSelect+` WHERE deleted_at IS NULL AND id IN
+		(SELECT skill_id FROM skill_assignments WHERE agent_id=?) ORDER BY name`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Skill
+	for rows.Next() {
+		sk, err := skillCols(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sk)
+	}
+	return out, rows.Err()
+}
+
 // ── room reads (P1#10 authoritativ) ─────────────────────────────────
 
 func (d *DB) MarkRoomRead(roomID, reader, at string) error {

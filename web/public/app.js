@@ -25,6 +25,7 @@
     lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
     threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
     chatTaskId: null, // P2#1: offenes Chatter-Panel (taskId)
+    skills: [], // P2#3: Skill-Store (paperclip company-skills)
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -1248,6 +1249,11 @@
   // ═════════════════════════════════════════════════════════════════
   // Agents-View
   // ═════════════════════════════════════════════════════════════════
+  async function loadSkills() {
+    state.skills = await api("GET", "/api/skills").catch(() => []);
+    if (state.view === "agents") renderSkillsPanel();
+  }
+
   async function loadAgents() {
     state.agents = await api("GET", "/api/agents");
     if (state.view === "agents") renderAgents();
@@ -1299,6 +1305,7 @@
       </div>`).join("");
     el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => agentModal(b.dataset.edit)));
     renderAgentsBadge();
+    renderSkillsPanel();
     el.querySelectorAll("[data-del]").forEach((b) =>
       b.addEventListener("click", async () => {
         const a = state.agents.find((x) => x.id === b.dataset.del);
@@ -1918,7 +1925,7 @@
       pendingApprovals = aps || [];
       renderApprovalBanner();
     }).catch(() => {});
-    await Promise.all([loadRooms(), loadAgents()]);
+    await Promise.all([loadRooms(), loadAgents(), loadSkills()]);
     // P1#10 (authoritativ): server-Wahrheit NACH rooms-Load anwenden —
     // Reload-feste Unread-Badges (client-only Zähler starben beim Reload).
     await applyServerUnreads();
@@ -1939,5 +1946,83 @@
       renderRoomList();
     } catch {}
   }
+// ── P2#3: Skills-Panel (Agents-View-Sektion; paperclip company-skills) ──
+  function renderSkillsPanel() {
+    // Section unter den Agent-Karten (eigenes grid)
+    let sec = $("#skillsPanel");
+    if (!sec) {
+      sec = document.createElement("div");
+      sec.id = "skillsPanel";
+      sec.className = "skills-panel";
+      $("#agentCards").after(sec);
+    }
+    const skills = state.skills || [];
+    if (!skills.length) { sec.innerHTML = "<h3><span class='sk-emoji'>🧩</span> Skills</h3><div class='hint' style='padding:6px 2px'>— noch keine Skills (wiederverwendbare Instruction-Bausteine) —</div>"; return; }
+    sec.innerHTML = `<h3><span class='sk-emoji'>🧩</span> Skills <button id="newSkillBtn" class="btn primary" style="margin-left:auto">＋ Skill</button></h3>
+      <div class="skills-grid">
+        ${skills.map((sk) => `
+          <div class="skill-card" data-skill="${esc(sk.id)}">
+            <div class="row">
+              <strong>${esc(sk.name)}</strong>
+              <span class="badge-pill" style="color:var(--ink-3);background:var(--s3)">v${sk.Version}</span>
+            </div>
+            <div class="desc">${esc((sk.instructions || "").slice(0, 120))}${(sk.instructions || "").length > 120 ? "…" : ""}</div>
+            <div class="sk-agents">${(sk.agentIds || []).length ? "gebunden: " + sk.agentIds.map((id) => esc((state.agents.find((a) => a.id === id) || {}).name || id)).join(", ") : "— keine Agents —"}</div>
+            <div class="actions">
+              <button class="btn" data-skedit="${esc(sk.id)}">Bearbeiten</button>
+              <button class="btn" data-skassign="${esc(sk.id)}">Agenten binden</button>
+              <button class="btn danger" data-skdel="${esc(sk.id)}">Löschen</button>
+            </div>
+          </div>`).join("")}
+      </div>`;
+    $("#newSkillBtn")?.addEventListener("click", () => skillModal());
+    sec.querySelectorAll("[data-skedit]").forEach((b) => b.addEventListener("click", () => skillModal(b.dataset.skedit)));
+    sec.querySelectorAll("[data-skassign]").forEach((b) => b.addEventListener("click", () => skillAssignModal(b.dataset.skassign)));
+    sec.querySelectorAll("[data-skdel]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Skill löschen? (Versionen bleiben restorebar)")) return;
+      await api("DELETE", `/api/skills/${b.dataset.skdel}`);
+      await loadSkills();
+    }));
+  }
+
+  function skillModal(id) {
+    const sk = id ? state.skills.find((x) => x.id === id) : null;
+    openModal(sk ? "Skill bearbeiten (neue Version)" : "Neuer Skill", [
+      { label: "Name", name: "name", type: "text", value: sk?.name || "", required: true },
+      { label: "Instructions", name: "instructions", type: "textarea", value: sk?.instructions || "", rows: 6 },
+    ], async (form) => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      if (sk) {
+        await api("PATCH", `/api/skills/${sk.id}`, data); // neue Version
+      } else {
+        await api("POST", "/api/skills", data);
+      }
+      await loadSkills();
+      return true;
+    });
+  }
+
+  function skillAssignModal(skillId) {
+    const sk = state.skills.find((x) => x.id === skillId);
+    if (!sk) return;
+    openModal(`Skill binden: ${sk.name}`, [
+      { label: "Agents (Mehrfachauswahl, Ctrl/⌘-Klick)", name: "agentIds", type: "select",
+        value: sk.agentIds || [], options: state.agents.map((a) => ({ value: a.id, label: `${a.emoji} ${a.name}` })) },
+    ], async (form) => {
+      const sel = form.querySelector('[name="agentIds"]');
+      sel.setAttribute("multiple", "multiple");
+      const ids = [...sel.selectedOptions].map((o) => o.value);
+      await api("PUT", `/api/skills/${skillId}/agents`, { agentIds: ids });
+      await loadSkills();
+      return true;
+    });
+    // multiple nach render setzen (select-Render-Vertrag)
+    const sel = $("#modal [name=agentIds]");
+    if (sel) { sel.setAttribute("multiple", "multiple"); sel.size = Math.min(6, Math.max(3, state.agents.length));
+      // vor-selektieren (bestehende Bindungen)
+      (sk?.agentIds || []).forEach((id) => { const o = sel.querySelector(`option[value="${id}"]`); if (o) o.selected = true; });
+    }
+  }
+
   boot();
 })();

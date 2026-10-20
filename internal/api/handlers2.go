@@ -761,6 +761,147 @@ func (s *Server) listUnread(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, m)
 }
 
+// ── skills (P2#3, paperclip company-skills.ts) ──────────────────────
+
+func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
+	sk, err := s.st.ListSkills(r.URL.Query().Get("all") == "1")
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if sk == nil {
+		sk = []*store.Skill{}
+	}
+	writeJSON(w, 200, sk)
+}
+
+func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Name         string   `json:"name"`
+		Instructions string   `json:"instructions"`
+		AgentIDs     []string `json:"agentIds"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	name := strings.TrimSpace(b.Name)
+	instr := strings.TrimSpace(b.Instructions)
+	if name == "" || instr == "" {
+		errJSON(w, 400, "name + instructions erforderlich")
+		return
+	}
+	sk := &store.Skill{
+		ID: newIDs("skill"), Name: name, Instructions: instr,
+		Version: 1, CreatedAt: nowISO(), UpdatedAt: nowISO(),
+	}
+	if err := s.st.InsertSkill(sk); err != nil {
+		log.Printf("[api] skill insert: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	for _, aid := range b.AgentIDs {
+		_ = s.st.AssignSkill(sk.ID, aid)
+	}
+	neu, _ := s.st.GetSkill(sk.ID)
+	s.broadcast(map[string]any{"type": "skills.changed", "ts": time.Now().UnixMilli()})
+	writeJSON(w, 201, neu)
+}
+
+func (s *Server) patchSkill(w http.ResponseWriter, r *http.Request) {
+	// update = neue Version-Row (Paperclip Version-History); alt bleibt restorebar
+	var b struct {
+		Name         string   `json:"name"`
+		Instructions string   `json:"instructions"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	old, err := s.st.GetSkill(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if old == nil {
+		errJSON(w, 404, "Skill nicht gefunden")
+		return
+	}
+	name := strings.TrimSpace(b.Name)
+	if name == "" {
+		name = old.Name
+	}
+	instr := strings.TrimSpace(b.Instructions)
+	if instr == "" {
+		instr = old.Instructions
+	}
+	newID, err := s.st.UpdateSkill(&store.Skill{ID: old.ID, Name: name, Instructions: instr})
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	neu, _ := s.st.GetSkill(newID)
+	s.broadcast(map[string]any{"type": "skills.changed", "ts": time.Now().UnixMilli()})
+	writeJSON(w, 200, neu)
+}
+
+func (s *Server) deleteSkill(w http.ResponseWriter, r *http.Request) {
+	if err := s.st.DeleteSkill(r.PathValue("id")); err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "skills.changed", "ts": time.Now().UnixMilli()})
+	w.WriteHeader(204)
+}
+
+func (s *Server) restoreSkill(w http.ResponseWriter, r *http.Request) {
+	if err := s.st.RestoreSkill(r.PathValue("id")); err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "skills.changed", "ts": time.Now().UnixMilli()})
+	sk, _ := s.st.GetSkill(r.PathValue("id"))
+	writeJSON(w, 200, sk)
+}
+
+func (s *Server) setSkillAgents(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		AgentIDs []string `json:"agentIds"`
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	id := r.PathValue("id")
+	old, err := s.st.SkillAgents(id)
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	for _, aid := range old {
+		if !contains(b.AgentIDs, aid) {
+			_ = s.st.UnassignSkill(id, aid)
+		}
+	}
+	for _, aid := range b.AgentIDs {
+		if !contains(old, aid) {
+			_ = s.st.AssignSkill(id, aid)
+		}
+	}
+	s.broadcast(map[string]any{"type": "skills.changed", "ts": time.Now().UnixMilli()})
+	sk, _ := s.st.GetSkill(id)
+	writeJSON(w, 200, sk)
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
 func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := s.st.GetMessage(r.PathValue("id"))

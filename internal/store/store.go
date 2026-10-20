@@ -86,6 +86,18 @@ type Attachment struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+type Skill struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Instructions string `json:"instructions"`
+	Version     int     `json:"version"`
+	ParentID    *string `json:"parentId,omitempty"`
+	DeletedAt   string  `json:"deletedAt,omitempty"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
+	AgentIDs    []string `json:"agentIds,omitempty"` // enriched: Bindungen
+}
+
 type RoomRead struct {
 	RoomID     string `json:"roomId"`
 	Reader     string `json:"reader"`
@@ -377,6 +389,25 @@ CREATE TABLE IF NOT EXISTS approvals (
   consumed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_pending ON approvals(status, created_at);
+-- Skills (P2#3, Codex-Matrix 2.3, paperclip company-skills.ts): ver-
+-- sionierbare Instruction-Bausteine; parent_id = Vorgänger-Version
+-- (Restore-Kette), deleted_at = soft-delete (Paperclip: Version History).
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  instructions TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  parent_id TEXT REFERENCES skills(id) ON DELETE SET NULL,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Bindung je Agent (M:N-lite; Paperclip: agent-skills).
+CREATE TABLE IF NOT EXISTS skill_assignments (
+  skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  PRIMARY KEY (skill_id, agent_id)
+);
 -- Read-State authoritativ (P1#10, paperclip sidebar-badges): je Raum+Reader
 -- der Marken-Zeitstempel; unread = COUNT(messages.created_at > last_read).
 CREATE TABLE IF NOT EXISTS room_reads (
