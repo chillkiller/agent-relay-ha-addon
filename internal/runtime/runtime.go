@@ -236,6 +236,8 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	cfg.SessionKey = fmt.Sprintf("agent:%s:relay:%s", target, userMsg.RoomID)
 
 	// stream placeholder row first, so ordering in UI is stable
+	// P1#4: Agent-Antwort erbt parent_id vom auslösenden Turn — der
+	// Agent-Turn bleibt im selben Thread wie die Frage.
 	msgID := store.NewID("msg")
 	placeholder := &store.Message{
 		ID:         msgID,
@@ -247,6 +249,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		Status:     "streaming",
 		CreatedAt:  nowRFC3339(),
 		UpdatedAt:  nowRFC3339(),
+		ParentID:   userMsg.ParentID,
 	}
 	if err := r.st.InsertMessage(placeholder); err != nil {
 		return err

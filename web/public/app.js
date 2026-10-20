@@ -23,6 +23,7 @@
     following: true,  // Follow-Scroll-Vertrag: nur near-bottom auto-follow
     newBelow: 0,      // Pill-Zähler "N neu ↓"
     lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
+    threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -671,6 +672,17 @@
 
   function wireReactionHandlers() {
     const wrap = $("#messages");
+    // P1#4: thread-count → zur ersten Antwort scrollen + flash-highlight
+    wrap.querySelectorAll("[data-topen]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const rootId = b.dataset.topen;
+        const first = Object.values(state.messages)
+          .filter((m) => m.parentId === rootId)
+          .sort((x, y) => String(x.createdAt).localeCompare(String(y.createdAt)))[0];
+        if (!first) return;
+        const el = document.querySelector(`[data-mid="${first.id}"]`);
+        if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); }
+      }));
     // Sprint-5c: Quick-Reaction-Buttons verdrahten (Matrix-34)
     wrap.querySelectorAll("[data-qr]").forEach((b) =>
       b.addEventListener("click", async () => {
@@ -694,6 +706,16 @@
         if (b.dataset.mact === "reply") {
           const who = m.senderKind === "human" ? "du" : m.senderName;
           const quote = m.content.split("\n").slice(0, 3).map((l) => `> ${l}`).join("\n");
+          // P1#4: Thread-Antwort — parent_id = Wurzel (bei Reply auf eine
+          // Antwort deren Wurzel), Composer-Chip zeigt den Anker
+          const rootId = m.parentId || m.id;
+          state.threadMode = { rootId };
+          const chip = $("#threadChip");
+          if (chip) {
+            chip.hidden = false;
+            chip.querySelector(".tc-label").textContent = `↩ Antwort auf ${who}`;
+            chip.querySelector(".tc-x").onclick = () => clearThreadMode();
+          }
           input.value = `@${m.senderKind === "human" ? "" : who} ${quote}\n\n`;
           input.dispatchEvent(new Event("input"));
           input.focus();
@@ -791,6 +813,12 @@
         <button class="m-action" data-mact="reply" data-x="${m.id}" title="Antworten (zitieren)">↩</button>
         ${m.senderKind === "human" ? `<button class="m-action" data-mact="edit" data-x="${m.id}" title="Bearbeiten">✎</button>` : ""}
       </span>`;
+    // P1#4: Thread-Marker — Antworten zeigen "↩", Wurzeln zeigen ReplyCount
+    const threadMark = m.parentId ? `<div class="thread-ref">↩ Antwort</div>` : "";
+    const siblings = m.parentId ? 0 : Object.values(state.messages)
+      .filter((x) => x.roomId === m.roomId && x.parentId === m.id).length;
+    const replyBadge = siblings > 0
+      ? `<button class="thread-count" data-topen="${m.id}" title="Antworten anzeigen">${siblings} ↩</button>` : "";
     // P1#2: Anhänge unter der Message rendern (Vorschau: Bilder inline,
     // Dateien als Chip mit Download-Link)
     const atts = (m.attachments || []);
@@ -829,8 +857,10 @@
         <summary class="meta">
           ${swatch}<span class="who">${esc(who)}</span>
           ${headLabel}
+          ${replyBadge}
           <span class="time">${esc(time)}</span>
         </summary>
+        ${threadMark}
         <div class="content">${renderContent(body)}</div>
         ${attHtml}
         ${streaming ? "" : rxBar}
@@ -839,8 +869,10 @@
     return `
       <div class="${cls}" data-mid="${m.id}">
         <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
+        ${threadMark}
         <div class="content">${renderContent(streaming ? streamBuf[m.id] : m.content)}</div>
         ${attHtml}
+        ${replyBadge}
         ${rxBar}
       </div>`;
   }
@@ -928,9 +960,11 @@
     input.value = ""; autoGrow(); sendBtn.disabled = true; hideMention();
     // Sprint-3a: gesendeter Draft wird gelöscht (buzz-Pattern)
     try { localStorage.removeItem(`relay.draft.${state.currentRoomId}`); } catch {}
+    // P1#4: Thread-Anker der Antwort
+    const parentId = state.threadMode?.rootId || "";
     let posted;
     try {
-      posted = await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
+      posted = await api("POST", `/api/rooms/${state.currentRoomId}/messages`, parentId ? { content, parentId } : { content });
     } catch (err) {
       pushLocalSystem(err.message);
       input.value = content; autoGrow(); sendBtn.disabled = false;
@@ -954,7 +988,13 @@
       composerFiles.value = "";
       updateAttachLabel();
     }
+    if (parentId) clearThreadMode();
   });
+  function clearThreadMode() {
+    state.threadMode = null;
+    const chip = $("#threadChip");
+    if (chip) chip.hidden = true;
+  }
 
   // P1#2: Attach-Button + Auswahl-Anzeige (📎 N)
   const composerFiles = $("#composerFiles");

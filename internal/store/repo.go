@@ -464,15 +464,18 @@ func (d *DB) RoomAgents(roomID string) ([]*Agent, error) {
 
 func scanMessage(r rowScanner) (*Message, error) {
 	m := &Message{}
-	var agentID sql.NullString
-	if err := r.Scan(&m.ID, &m.RoomID, &agentID, &m.SenderName, &m.SenderKind, &m.Content, &m.Status, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	var agentID, parentID sql.NullString
+	if err := r.Scan(&m.ID, &m.RoomID, &agentID, &m.SenderName, &m.SenderKind, &m.Content, &m.Status, &m.CreatedAt, &m.UpdatedAt, &parentID); err != nil {
 		return nil, err
 	}
 	m.AgentID = agentID.String
+	if parentID.Valid {
+		m.ParentID = &parentID.String
+	}
 	return m, nil
 }
 
-const msgCols = `id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at`
+const msgCols = `id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at,parent_id`
 
 func (d *DB) ListMessages(roomID string, limit int) ([]*Message, error) {
 	if limit <= 0 || limit > 1000 {
@@ -620,10 +623,64 @@ func (d *DB) GetAttachment(id string) (*Attachment, error) {
 }
 
 func (d *DB) InsertMessage(m *Message) error {
-	_, err := d.db.Exec(`INSERT INTO messages (id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.RoomID, nullable(m.AgentID), m.SenderName, m.SenderKind, m.Content, m.Status, m.CreatedAt, m.UpdatedAt)
+	parentID := ""
+	if m.ParentID != nil {
+		parentID = *m.ParentID
+	}
+	_, err := d.db.Exec(`INSERT INTO messages (id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at,parent_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.RoomID, nullable(m.AgentID), m.SenderName, m.SenderKind, m.Content, m.Status, m.CreatedAt, m.UpdatedAt, nullable(parentID))
 	return err
+}
+
+// Replies (P1#4): Direkt-Antworten je Wurzel, älteste zuerst.
+func (d *DB) ListReplies(rootID string) ([]*Message, error) {
+	rows, err := d.db.Query(`SELECT `+msgCols+` FROM messages WHERE parent_id=? ORDER BY created_at ASC LIMIT 500`, rootID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	d.enrichAttachments(out)
+	return out, nil
+}
+
+// ReplyCountBatch (P1#2-Stil: 1 Query, kein N+1): map[rootID]→count.
+func (d *DB) ReplyCountBatch(rootIDs []string) (map[string]int, error) {
+	if len(rootIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	q := `SELECT parent_id, COUNT(*) FROM messages WHERE parent_id IN (` +
+		strings.Repeat("?,", len(rootIDs)-1) + `?) GROUP BY parent_id`
+	args := make([]any, len(rootIDs))
+	for i, v := range rootIDs {
+		args[i] = v
+	}
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var pid string
+		var c int
+		if err := rows.Scan(&pid, &c); err != nil {
+			return nil, err
+		}
+		out[pid] = c
+	}
+	return out, rows.Err()
 }
 
 func (d *DB) UpdateMessage(id string, content string, status string) error {

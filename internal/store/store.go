@@ -69,6 +69,8 @@ type Message struct {
 	CreatedAt  string `json:"createdAt"`
 	UpdatedAt  string `json:"updatedAt"`
 	Attachments []*Attachment `json:"attachments,omitempty"` // P1#2: enriched on read
+	ParentID   *string `json:"parentId,omitempty"` // P1#4: thread root (reply-to)
+	ReplyCount int     `json:"replyCount,omitempty"` // P1#4: enriched on read
 }
 
 type Attachment struct {
@@ -162,6 +164,14 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.position alter: %w", err)
 		}
 	}
+	// P1#4 (Codex-Matrix 1.5): Threads — parent_id auf messages. Nullable,
+	// deshalb genügt das idempotente ADD COLUMN (kein Rebuild).
+	if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN parent_id TEXT REFERENCES messages(id) ON DELETE CASCADE`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("messages.parent_id alter: %w", err)
+		}
+	}
 	// dm-kind support: die alte CHECK-constraint (chat|project) verhindert
 	// dm-rows; rebuild der tabelle (sqlite kann constraints nicht alter-n) —
 	// nur wenn die constraint wirklich noch die alte form trägt (idempotent)
@@ -198,7 +208,8 @@ func migrate(db *sql.DB) error {
   status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('streaming','complete','error')),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 )`,
-			`INSERT INTO messages SELECT * FROM messages_old`,
+			`INSERT INTO messages (id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at,parent_id)
+			 SELECT id,room_id,agent_id,sender_name,sender_kind,content,status,created_at,updated_at,parent_id FROM messages_old`,
 			`CREATE TABLE room_members (
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

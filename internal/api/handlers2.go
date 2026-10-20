@@ -324,7 +324,8 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 type messageBody struct {
-	Content string `json:"content"`
+	Content  string `json:"content"`
+	ParentID string `json:"parentId,omitempty"` // P1#4: thread reply-to
 }
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +359,14 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		Status:     "complete",
 		CreatedAt:  nowISO(),
 		UpdatedAt:  nowISO(),
+	}
+	// P1#4: parent_id nur setzen, wenn die Wurzel existiert (gleicher Raum —
+	// Threads bleiben räumlich verankert; cross-room replies sind nicht v1)
+	if strings.TrimSpace(b.ParentID) != "" {
+		root, err := s.st.GetMessage(strings.TrimSpace(b.ParentID))
+		if err == nil && root != nil && root.RoomID == roomID {
+			m.ParentID = &b.ParentID
+		}
 	}
 	if err := s.st.InsertMessage(m); err != nil {
 		log.Printf("[api] store error: %v", err)
@@ -594,6 +603,20 @@ func (s *Server) addReaction(w http.ResponseWriter, r *http.Request) {
 	}
 	s.broadcast(map[string]any{"type": "message.updated", "messageId": r.PathValue("id"), "ts": time.Now().UnixMilli()})
 	writeJSON(w, 201, map[string]any{"ok": true})
+}
+
+// listReplies (P1#4): Direkt-Antworten je Wurzel.
+func (s *Server) listReplies(w http.ResponseWriter, r *http.Request) {
+	msgs, err := s.st.ListReplies(r.PathValue("id"))
+	if err != nil {
+		log.Printf("[api] replies: %v", err)
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if msgs == nil {
+		msgs = []*store.Message{}
+	}
+	writeJSON(w, 200, msgs)
 }
 
 // getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).

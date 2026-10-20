@@ -871,3 +871,25 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 
 /* ── P1#3 Notifications ────────────────────────────── */
 .menu-sep { height: 1px; background: var(--line); margin: 4px 10px; }
+
+/* ── P1#4 Threads ─────────────────────────────────── */
+.thread-ref { font-size: 11px; color: var(--accent-hover); margin: 2px 0 0; }
+.thread-count {
+  display: inline-block; margin-top: 4px;
+  font-size: 11px; font-weight: 600; color: var(--accent-hover);
+  background: var(--accent-subtle, rgba(255,92,92,.12));
+  border: 1px solid var(--accent); border-radius: var(--r-pill);
+  padding: 2px 10px; cursor: pointer; font-family: inherit;
+}
+.thread-count:hover { background: rgba(255,92,92,.2); }
+.thread-chip {
+  position: absolute; top: -34px; left: var(--sp-4);
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--accent-subtle, rgba(255,92,92,.12));
+  border: 1px solid var(--accent); border-radius: var(--r-md);
+  padding: 3px 10px; font-size: 12px; color: var(--ink); z-index: 10;
+}
+.tc-x { border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0 3px; font: inherit; font-size: 12px; }
+.tc-x:hover { color: var(--ink); }
+@keyframes relay-flash { 0% { background: rgba(255,92,92,.18); } 100% { background: transparent; } }
+.msg.flash { animation: relay-flash 1.6s ease-out; }
