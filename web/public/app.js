@@ -27,6 +27,7 @@
     chatTaskId: null, // P2#1: offenes Chatter-Panel (taskId)
     skills: [], // P2#3
     routines: [], // P2#4: recurring Agent-Trigger
+    boardFilter: "all", // P2#6: Swimlane-Filter
     roomRoles: {}, // P2#8: map[agentId]→role je aktueller Raum: Skill-Store (paperclip company-skills)
   };
 
@@ -338,6 +339,7 @@
         // Banner-Karte entfernen (decision kommt mit approval-Objekt)
         pendingApprovals = pendingApprovals.filter((x) => x.id !== e.approval?.id);
         renderApprovalBanner();
+        updateDashBadge(); // P2#7-Badge live
         break;
       }
       case "message.updated": {
@@ -653,16 +655,12 @@
     $("#activeRoomName").textContent = room?.name ?? "";
     updateBoardBadge(room);
     renderMemberChips(room);
-    // P2#8: Rollen je Member laden (Chip-Anzeige + Toggle)
-    api("GET", `/api/rooms/${id}`).then((r) => {
-      if (r && r.id === state.currentRoomId) {
-        state.roomRoles = {};
-        for (const aid of (r.memberAgentIds || [])) state.roomRoles[aid] = ""; // default (role im room-API lehr — siehe repo.RoomRoles-Vertrag)
-      }
-      api("GET", `/api/rooms`).then((all) => {
-        roleSyncFromRooms(all);
+    // P2#8 + Befund 3 (Codex-Audit): Rollen aus dem REST-Vertrag laden
+    api("GET", `/api/rooms/${id}/roles`).then((roles) => {
+      if (roles && state.currentRoomId === id) {
+        state.roomRoles = roles || {};
         renderMemberChips(state.rooms.find((r) => r.id === state.currentRoomId));
-      }).catch(() => {});
+      }
     }).catch(() => {});
     renderPinnedBanner(id);
     const isProject = room?.kind === "project";
@@ -996,6 +994,60 @@
     const n = state.settings?.relayUser ?? "";
     return String(n || "gaRON");
   }
+  // ── P2#12: Slash-Command-Handling (Paperclip-Vertrag) ──
+  function handleSlashCommand(raw) {
+    const [cmd, ...rest] = raw.trim().split(/\s+/);
+    const arg = rest.join(" ").trim();
+    const room = state.rooms.find((r) => r.id === state.currentRoomId);
+    const cmds = {
+      "/help": () => {
+        openModal("Slash-Commands", [], () => {});
+        const dlg = $("#modal");
+        const list = document.createElement("div");
+        list.className = "shortcut-list";
+        list.innerHTML = [
+          ["/task Titel", "Neue Aufgabe im Projekt-Raum"],
+          ["/topic Thema", "Raum-Thema setzen (P1#8)"],
+          ["/pin", "Letzte Nachricht anpinnen"],
+          ["/unpin", "Lospinen"],
+          ["/help", "Diese Übersicht"],
+        ].map(([k, d]) => `<div class="shortcut-row"><span>${esc(d)}</span><kbd>${esc(k)}</kbd></div>`).join("");
+        dlg.querySelector("form").before(list);
+      },
+      "/task": async () => {
+        if (!room) return;
+        if (room.kind === "project" || !room.projectId) { toast("Slash /task braucht Projekt-Raum"); return; }
+        if (!arg) { toast("Usage: /task Titel"); return; }
+        await api("POST", "/api/tasks", { projectId: room.projectId, title: arg, status: "todo" });
+        renderInlineBoard();
+        toast("Aufgabe angelegt");
+      },
+      "/topic": async () => {
+        if (!room || !arg) { toast("Usage: /topic Thema"); return; }
+        await api("PATCH", `/api/rooms/${room.id}`, { topic: arg });
+        await loadRooms();
+        toast("Thema gesetzt");
+      },
+      "/pin": async () => { await pinLastMessage(room); },
+      "/unpin": async () => { await pinLastMessage(room, true); },
+    };
+    const fn = cmds[cmd.toLowerCase()];
+    if (fn) fn();
+    else { toast(`Unbekannt: ${cmd} — /help`); input.value = ""; sendBtn.disabled = true; }
+  }
+  async function pinLastMessage(room, unpin) {
+    if (!room) return;
+    const lastId = Object.values(state.messages)
+      .filter((m) => m.roomId === room.id && m.senderKind !== "system")
+      .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))[0]?.id || "";
+    const id = unpin ? "" : lastId;
+    if (!unpin && !lastId) { toast("Keine Nachricht zum Anpinnen"); return; }
+    try {
+      await api("PATCH", `/api/rooms/${room.id}`, { pinnedMessageId: id });
+      await loadRooms();
+      renderPinnedBanner(room.id);
+    } catch (err) { toast(err.message); }
+  }
   function fmtSize(n) {
     if (n == null) return "";
     if (n > 1048576) return (n / 1048576).toFixed(1) + " MB";
@@ -1078,6 +1130,12 @@
     const content = input.value.trim();
     if (!content || !state.currentRoomId) return;
     input.value = ""; autoGrow(); sendBtn.disabled = true; hideMention();
+    // P2#12: Slash-Commands (Paperclip /-Vertrag): /task, /topic, /pin,
+    // /help — der Rest bleibt normales Senden; Commands konsumieren den Text.
+    if (content.startsWith("/")) {
+      handleSlashCommand(content);
+      return;
+    }
     // Sprint-3a: gesendeter Draft wird gelöscht (buzz-Pattern)
     try { localStorage.removeItem(`relay.draft.${state.currentRoomId}`); } catch {}
     // P1#4: Thread-Anker der Antwort
@@ -1457,8 +1515,13 @@
       el.innerHTML = `<div class="empty-state"><div class="big">🗂</div>Kein Projekt verknüpft.</div>`;
       return;
     }
-    el.innerHTML = `<div class="board-wrap">${projects.map((p) => {
-      const tasks = state.tasks.filter((t) => t.projectId === p.id);
+    // P2#6: Swimlane-Filter (Chips über dem Board; state.boardFilter)
+    const filter = state.boardFilter || "all";
+    const chipRow = `<div class="board-filters">${[["all","Alles"],["todo","Zu tun"],["doing","In Arbeit"],["done","Fertig"]].map(([k, l]) =>
+      `<button type="button" class="bf ${filter === k ? "on" : ""}" data-bfilter="${k}">${l}</button>`).join("")}</div>`;
+    el.innerHTML = chipRow + `<div class="board-wrap">${projects.map((p) => {
+      const tasksRaw = state.tasks.filter((t) => t.projectId === p.id);
+      const tasks = filter === "all" ? tasksRaw : tasksRaw.filter((t) => t.status === filter);
       return `
       <div class="project">
         <div class="p-head">
@@ -1487,7 +1550,11 @@
         <button class="add-task" data-taskadd="${p.id}">＋ Aufgabe</button>
       </div>`;
     }).join("")}</div>`;
-    el.querySelectorAll("[data-taskadd]").forEach((b) => b.addEventListener("click", () => taskModal(b.dataset.taskadd)));
+    el.querySelectorAll("[data-bfilter]").forEach((b) => b.addEventListener("click", () => {
+      state.boardFilter = b.dataset.bfilter;
+      renderInlineBoard();
+    }));
+        el.querySelectorAll("[data-taskadd]").forEach((b) => b.addEventListener("click", () => taskModal(b.dataset.taskadd)));
     el.querySelectorAll("[data-tmove]").forEach((b) => b.addEventListener("click", async () => {
       const [id, st] = b.dataset.tmove.split(":");
       await api("PATCH", `/api/tasks/${id}`, { status: st });
@@ -1962,6 +2029,7 @@
       renderApprovalBanner();
     }).catch(() => {});
     await Promise.all([loadRooms(), loadAgents(), loadSkills(), loadRoutines()]);
+    updateDashBadge();
     // P1#10 (authoritativ): server-Wahrheit NACH rooms-Load anwenden —
     // Reload-feste Unread-Badges (client-only Zähler starben beim Reload).
     await applyServerUnreads();
@@ -2175,12 +2243,18 @@
   }
   // ── P2#8: Rollen am Member-Chip (Klick-Cycle '' → admin → '') ──
   function memberRole(aid) { return state.roomRoles?.[aid] || ""; }
-  function roleSyncFromRooms(all) {
-    // server-side roles stehen NICHT im rooms-Listing (Contract-Schmerz);
-    // der Klick-Cycle schreibt und zeigt — Reload-Verlust ist v1-Bewusst
-    // (Role-Toggle-UI = Live-Verhalten; Persistenz kommt mit room-API-Enrichment)
-    void all;
-  }
+
 
   boot();
 })();
+
+  // P2#7: Decision-Queue-Badge am Übersicht-Button (pending+unread live)
+  async function updateDashBadge() {
+    const d = await api("GET", "/api/dashboard").catch(() => null);
+    const b = $("#dashBadge");
+    if (!b) return;
+    const n = ((d?.pendingApprovals || []).length) + (d?.unreadTotal || 0);
+    b.hidden = n === 0;
+    b.textContent = String(n);
+  }
+  

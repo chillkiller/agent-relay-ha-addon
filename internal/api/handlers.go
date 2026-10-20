@@ -141,6 +141,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.HandleFunc("GET /api/rooms", s.listRooms)
 	mux.HandleFunc("POST /api/rooms", s.createRoom)
+	mux.HandleFunc("GET /api/rooms/{id}/roles", s.roomRoles)
 	mux.HandleFunc("GET /api/rooms/{id}", s.getRoom)
 	mux.HandleFunc("PATCH /api/rooms/{id}", s.patchRoom)
 	mux.HandleFunc("DELETE /api/rooms/{id}", s.deleteRoom)

@@ -659,6 +659,21 @@ func (d *DB) FindGrantedApproval(agentID, userMsgID string) (*Approval, error) {
 	return a, nil
 }
 
+// ConsumeApprovalFor (Befund 1, Codex-Audit): atomarer Grant-Konsum für
+// das Turn-Paar — einzelne UPDATE mit Subselect; true = DIESER Turn führt
+// aus, false = Token schon verbrannt (anderer Worker; Turn skippen).
+func (d *DB) ConsumeApprovalFor(agentID, userMsgID string) (bool, error) {
+	res, err := d.db.Exec(`UPDATE approvals SET consumed_at=? WHERE id=(
+		SELECT id FROM approvals WHERE agent_id=? AND user_msg_id=? AND status='granted' AND consumed_at IS NULL
+		ORDER BY decided_at DESC LIMIT 1) AND consumed_at IS NULL`,
+		now(), agentID, userMsgID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // ConsumeApproval: Grant-Token verbrennen (Execution-Paar; Audit bleibt).
 func (d *DB) ConsumeApproval(id string) error {
 	_, err := d.db.Exec(`UPDATE approvals SET consumed_at=? WHERE id=? AND consumed_at IS NULL`, now(), id)

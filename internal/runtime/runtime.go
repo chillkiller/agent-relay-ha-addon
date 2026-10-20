@@ -465,11 +465,11 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	// beenden; die Freigabe re-enqueued den Original-Turn über die
 	// bestehende enqueueTurn-Kette (latest-wins bleibt intakt).
 	if a.ApprovalGate {
-		// P2#2: Offener Grant-Token für DIESES Turn-Paar? → konsumieren und
-		// durchstreamen (Resume-Weg; sonst endlos-Re-Trigger des Gates).
-		if granted, _ := r.st.FindGrantedApproval(a.ID, userMsg.ID); granted != nil {
-			_ = r.st.ConsumeApproval(granted.ID)
-		} else {
+		// P2#2 + Befund 1 (Codex-Audit): ATOMARER Grant-Konsum — true =
+		// dieser Turn führt aus (Resume-Weg); false = Token schon verbrannt
+		// (Doppel-Resume-Schutz) → Turn still skippen, KEIN Gate-Re-Trigger.
+		runs, _ := r.st.ConsumeApprovalFor(a.ID, userMsg.ID)
+		if runs != true {
 			ap := &store.Approval{
 				ID:        store.NewID("appr"),
 				AgentID:   a.ID,

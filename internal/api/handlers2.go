@@ -204,6 +204,15 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, created)
 }
 
+func (s *Server) roomRoles(w http.ResponseWriter, r *http.Request) {
+	roles, err := s.st.RoomRoles(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	writeJSON(w, 200, roles)
+}
+
 func (s *Server) getRoom(w http.ResponseWriter, r *http.Request) {
 	room, err := s.st.GetRoom(r.PathValue("id"))
 	if err != nil {

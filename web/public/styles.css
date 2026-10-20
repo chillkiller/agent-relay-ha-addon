@@ -982,3 +982,9 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 
 .chip.role-admin { border-color: var(--warn); }
 .role-tag { color: var(--warn); font-size: 10px; margin-left: 2px; }
+
+/* ── P2#6 Swimlane + P2#7 Decision-Badge ─────────── */
+.board-filters { display: flex; gap: 6px; margin: 0 0 10px; flex-wrap: wrap; }
+.bf { font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--s2); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 12px; }
+.bf.on { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-subtle, rgba(255,92,92,.12)); }
+.nav-badge { margin-left: 6px; font-size: 10px; font-weight: 700; background: var(--accent); color: #fff; border-radius: var(--r-pill); padding: 1px 7px; }
