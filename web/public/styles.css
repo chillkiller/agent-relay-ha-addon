@@ -1098,3 +1098,13 @@ html[data-theme="light"] {
   border-radius: var(--r-md);
 }
 #app.side-collapsed #sideCollapse:hover { background: var(--s3); color: var(--ink); }
+
+/* Fenster- + Composer-Scrollbar thematisch (GaRoN 20:40: „fremde Balken
+   rechts“ — die rechten Markierungen waren der Transcript-/#messages-
+   Thumb + die ungestylte Fenster-Scrollbar + Composer-Scrollbar-Dots;
+   Transcript-Scrollbars sind bereits gestylt, Fenster/Composer holen nach). */
+html::-webkit-scrollbar, body::-webkit-scrollbar, #composerInput::-webkit-scrollbar { width: 8px; }
+html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, #composerInput::-webkit-scrollbar-thumb {
+  background: var(--line-2); border-radius: var(--r-pill);
+}
+html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, #composerInput::-webkit-scrollbar-track { background: transparent; }
