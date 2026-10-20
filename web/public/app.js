@@ -136,6 +136,8 @@
         if (!e.message || e.message.roomId !== state.currentRoomId) break;
         state.messages[e.message.id] = e.message;
         streamBuf[e.message.id] = "";
+        // Sprint-3b: Turn-Laufzeit-Chronometer (Worked-for-Head, Matrix-12)
+        turnTimers[e.message.id] = { t0: Date.now(), tokens: 0 };
         renderMessages();
         break;
       }
@@ -148,6 +150,12 @@
       }
       case "agent.token": {
         streamBuf[e.messageId] = (streamBuf[e.messageId] ?? "") + e.delta;
+        if (turnTimers[e.messageId]) turnTimers[e.messageId].tokens++;
+        // Sprint-3b: Worked-for-Head live aktualisieren (Sekunden-Zähler)
+        const headEl = document.querySelector(`[data-mid="${e.messageId}"] .turn-head-label`);
+        if (headEl && turnTimers[e.messageId]) {
+          headEl.textContent = `schreibt seit ${Math.round((Date.now() - turnTimers[e.messageId].t0) / 1000)} s`;
+        }
         const el = document.querySelector(`[data-mid="${e.messageId}"] .content`);
         if (el) el.textContent = streamBuf[e.messageId];
         // Follow-Scroll-Vertrag: Token- Frames folgen nur near-bottom,
@@ -158,6 +166,13 @@
       }
       case "agent.finished": {
         delete streamBuf[e.message.id ?? ""];
+        // Sprint-3b: Turn-Zusammenfassung für den Fold-Head (Matrix-12)
+        if (e.message?.id && turnTimers[e.message.id]) {
+          const tt = turnTimers[e.message.id];
+          const ms = Date.now() - tt.t0;
+          turnStats[e.message.id] = { secs: Math.max(1, Math.round(ms / 1000)), tokens: tt.tokens };
+          delete turnTimers[e.message.id];
+        }
         if (e.message && state.messages[e.message.id]) {
           state.messages[e.message.id] = e.message;
           renderMessages();
@@ -445,6 +460,11 @@
     try { localStorage.setItem(`relay.lastRead.${id}`, String(state.lastRead[id])); } catch {}
     delete state.rooms.find((r) => r.id === id)?.unread;
     state.newBelow = 0; updateNewPill();
+    // Sprint-3a: Draft des Raums wiederherstellen (Matrix-9)
+    const draft = restoreDraft(id);
+    input.value = draft;
+    sendBtn.disabled = !draft.trim();
+    autoGrow();
     renderRoomList();
     switchView("chat");
     const room = state.rooms.find((r) => r.id === id);
@@ -500,6 +520,9 @@
   // Nachrichten (Slack-Dichte: Meta nur bei Gruppenstart)
   // ═════════════════════════════════════════════════════════════════
   const streamBuf = {};
+  // Sprint-3b: Turn-Chronometrie (Matrix-12, "Worked for…"-Fold)
+  const turnTimers = {};
+  const turnStats = {};
 
   async function loadMessages() {
     if (!state.currentRoomId) return;
@@ -547,6 +570,26 @@
 
   function wireReactionHandlers() {
     const wrap = $("#messages");
+    // Sprint-3c: Hover-Aktionen verdrahten (Matrix-33)
+    wrap.querySelectorAll("[data-mact]").forEach((b) =>
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const id = b.dataset.x;
+        const m = state.messages[id];
+        if (!m) return;
+        if (b.dataset.mact === "copy") {
+          (navigator.clipboard?.writeText(m.content) || Promise.reject())
+            .then(() => toast("Kopiert")).catch(() => toast("Kopieren fehlgeschlagen"));
+        }
+        if (b.dataset.mact === "reply") {
+          const who = m.senderKind === "human" ? "du" : m.senderName;
+          const quote = m.content.split("\n").slice(0, 3).map((l) => `> ${l}`).join("\n");
+          input.value = `@${m.senderKind === "human" ? "" : who} ${quote}\n\n`;
+          input.dispatchEvent(new Event("input"));
+          input.focus();
+        }
+        if (b.dataset.mact === "edit") editMessageModal(m);
+      }));
     wrap.querySelectorAll("[data-rxadd]").forEach((b) =>
       b.addEventListener("click", (ev) =>
         openReactionPicker(ev.currentTarget, b.dataset.rxadd)));
@@ -562,6 +605,25 @@
         } catch (err) { toast(err.message); }
         await loadReactions(); renderMessages();
       }));
+  }
+
+  // Sprint-3c: Eigene Nachricht bearbeiten (Modal; PATCH-Endpoint folgt P1#1 —
+  // solange fehlt serverseitiges PATCH speichert der Submit lokal nicht;
+  // Guard unten fängt den Fehler und rekonstruiert den Text)
+  function editMessageModal(m) {
+    openModal("Nachricht bearbeiten", [
+      { label: "Text", name: "content", type: "textarea", value: m.content, rows: 4 },
+    ], async (data) => {
+      const c = (data.content || "").trim();
+      if (!c) return;
+      try {
+        await api("PATCH", `/api/messages/${m.id}`, { content: c });
+      } catch (err) {
+        toast(err.message.includes("404") || err.message.includes("405")
+          ? "Bearbeiten-Endpoint fehlt noch (P1#1 offene Lane)"
+          : err.message);
+      }
+    });
   }
 
   function openReactionPicker(anchor, messageId) {
@@ -613,14 +675,42 @@
     const agent = m.agentId ? state.agents.find((a) => a.id === m.agentId) : null;
     const rx = (state.reactions[m.id] || [])
       .map((r) => `<button class="rx-chip ${r.actors.includes("Du") ? "mine" : ""}" data-rx="${m.id}:${r.emoji}" title="${esc(r.actors.join(", "))}">${r.emoji} ${r.count}</button>`).join("");
+    // Sprint-3c (Matrix-33): Hover-Aktionen (Kopieren/Antworten/Bearbeiten)
+    // neben dem Reaktions-＋ — opacity-0→1 per .msg:hover (CSS), Touch immer
+    const actions = m.senderKind === "system" ? "" :
+      `<span class="msg-act">
+        <button class="m-action" data-mact="copy" data-x="${m.id}" title="Kopieren">⧉</button>
+        <button class="m-action" data-mact="reply" data-x="${m.id}" title="Antworten (zitieren)">↩</button>
+        ${m.senderKind === "human" ? `<button class="m-action" data-mact="edit" data-x="${m.id}" title="Bearbeiten">✎</button>` : ""}
+      </span>`;
     const rxBar = m.senderKind === "system" ? "" :
-      `<div class="rx-bar">${rx}<button class="rx-add" data-rxadd="${m.id}" title="Reaktion">＋</button></div>`;
+      `<div class="rx-bar">${rx}<button class="rx-add" data-rxadd="${m.id}" title="Reaktion">＋</button>${actions}</div>`;
     const who = m.senderKind === "human" ? "du" : m.senderName;
     const groupFirst = !prev || prev.senderKind !== m.senderKind || prev.senderName !== m.senderName;
     const time = fmtTime(m.createdAt);
     const streaming = m.status === "streaming" && streamBuf[m.id] !== undefined;
     const cls = ["msg", m.senderKind, m.status === "error" ? "error" : "", streaming ? "streaming" : "", groupFirst ? "group-first" : ""].filter(Boolean).join(" ");
     const swatch = agent ? `<span class="swatch" style="background:${esc(agent.color)}"></span>` : "";
+    // Sprint-3b (Matrix-12): Agent-Turns als einklappbare Gruppe
+    // (details/summary — plain-JS-Form des OpenClaw-Disclosures).
+    // Head: "schreibt seit X s" live / nach Fertigstellung "X s · Y Frames".
+    if (agent && (streaming || m.status === "complete")) {
+      const st = turnStats[m.id];
+      const headLabel = streaming
+        ? `<span class="turn-head-label">schreibt…</span>`
+        : (st ? `<span class="turn-head-label">${st.secs} s · ${st.tokens} Frames</span>` : `<span class="turn-head-label">fertig</span>`);
+      const body = streaming ? (streamBuf[m.id] ?? "") : m.content;
+      return `
+      <details class="${cls} turn" data-mid="${m.id}" ${streaming ? "open" : ""}>
+        <summary class="meta">
+          ${swatch}<span class="who">${esc(who)}</span>
+          ${headLabel}
+          <span class="time">${esc(time)}</span>
+        </summary>
+        <div class="content">${renderContent(body)}</div>
+        ${streaming ? "" : rxBar}
+      </details>`;
+    }
     return `
       <div class="${cls}" data-mid="${m.id}">
         <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
@@ -650,6 +740,25 @@
   const input = $("#composerInput");
   const sendBtn = $("#composerSend");
 
+  // ── Sprint-3a: Drafts pro Raum (Matrix-9, buzz draftSubmitKey.ts) ──
+  // write-on-input (debounced 300 ms) in localStorage[relay.draft.<roomId>],
+  // Restore beim Raumwechsel, Clear beim Senden.
+  let draftTimer = null;
+  function saveDraft() {
+    const rid = state.currentRoomId;
+    if (!rid) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      try {
+        if (input.value) localStorage.setItem(`relay.draft.${rid}`, input.value);
+        else localStorage.removeItem(`relay.draft.${rid}`);
+      } catch {}
+    }, 300);
+  }
+  function restoreDraft(rid) {
+    try { return localStorage.getItem(`relay.draft.${rid}`) || ""; } catch { return ""; }
+  }
+
   // "N neu ↓"-Pill (Matrix-11): Klick = scroll to bottom + Resync
   $("#newBelowPill")?.addEventListener("click", () => {
     scrollBottom(true); renderMessages(true);
@@ -666,6 +775,7 @@
     sendBtn.disabled = !input.value.trim();
     autoGrow();
     mentionCheck();
+    saveDraft();
   });
   input.addEventListener("keydown", (ev) => {
     if (mentionKey(ev)) return;
@@ -684,6 +794,8 @@
     const content = input.value.trim();
     if (!content || !state.currentRoomId) return;
     input.value = ""; autoGrow(); sendBtn.disabled = true; hideMention();
+    // Sprint-3a: gesendeter Draft wird gelöscht (buzz-Pattern)
+    try { localStorage.removeItem(`relay.draft.${state.currentRoomId}`); } catch {}
     try {
       await api("POST", `/api/rooms/${state.currentRoomId}/messages`, { content });
     } catch (err) {
@@ -1080,7 +1192,7 @@
           : f.type === "checkbox"
           ? `<label class="checkrow"><input type="checkbox" name="${f.name}" ${f.checked ? "checked" : ""}/>${esc(f.label)}</label>`
           : f.type === "textarea"
-          ? `<label>${esc(f.label)}<textarea name="${f.name}">${esc(f.value ?? "")}</textarea></label>`
+          ? `<label>${esc(f.label)}<textarea name="${f.name}" rows="${f.rows ?? 3}">${esc(f.value ?? "")}</textarea></label>`
           : `<label>${esc(f.label)}<input type="${f.type}" name="${f.name}" value="${esc(f.value ?? "")}" ${f.required ? "required" : ""}/></label>`).join("")}
         <div class="modal-actions">
           <button type="button" class="btn" data-cancel>Abbrechen</button>

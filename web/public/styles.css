@@ -768,3 +768,36 @@ body {
 .room-presence.on { background:var(--ok); box-shadow:0 0 6px color-mix(in srgb, var(--ok) 50%, transparent); }
 .mention-chip { display:inline-flex; align-items:center; background:var(--s3); border:1px solid var(--line); border-radius:var(--r-pill); padding:1px 7px; font-size:12.5px; font-weight:600; color:var(--accent); white-space:nowrap; }
 .msg .mention-chip { vertical-align:middle; }
+
+/* ── Sprint-3 (Matrix-9/12/33) ─────────────────────── */
+/* Turn-Fold (Matrix-12, OpenClaw "Worked for…" + details): Agent-Turns sind
+   einklappbare Gruppen; summary = meta-Zeile, live-Label während Streaming */
+details.msg.turn > summary { list-style: none; cursor: pointer; }
+details.msg.turn > summary::-webkit-details-marker { display: none; }
+details.msg.turn > summary::before {
+  content: "▸"; color: var(--ink-4); font-size: 10px;
+  width: 12px; display: inline-block; flex: none;
+  transition: transform .12s ease;
+}
+details.msg.turn[open] > summary::before { transform: rotate(90deg); }
+details.msg.turn > summary .meta-marker { display: none; }
+.turn-head-label {
+  color: var(--ink-4); font-size: 11.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hover); }
+/* Folding darf Scroll-Höhe nicht springen lassen beim Open/Close:
+   content bleibt normal im Flow; details ist display:block wie div.msg */
+/* Message-Hover-Aktionen (Matrix-33, Paperclip opacity-0 group-hover) */
+.msg-act { display: inline-flex; gap: 1px; margin-left: 4px; opacity: 0; transition: opacity .12s; }
+.msg:hover .msg-act, .msg:focus-within .msg-act { opacity: 1; }
+.m-action {
+  width: 22px; height: 22px; padding: 2px; font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-xs);
+  background: var(--s3); color: var(--ink-3); cursor: pointer;
+}
+.m-action:hover { color: var(--ink); background: var(--s4); }
+@media (hover: none) {
+  .msg-act { opacity: 1; } /* Touch: immer sichtbar (Paperclip-Konvention) */
+}
