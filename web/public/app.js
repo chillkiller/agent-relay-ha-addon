@@ -543,7 +543,10 @@
     }
 
     // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)
-    el.querySelectorAll("[data-group-toggle]").forEach((t) =>
+    // guard: nav-group-Toggles (bindSidebarGroups) haben kein data-group-body —
+    // ohne Guard wirft dieser zweite Handler je Klick TypeError (GaRoN 20:24-Zug).
+    el.querySelectorAll("[data-group-toggle]").forEach((t) => {
+      if (t.closest(".nav-group")) return; // nav-groups sind oben gebunden — sonst Doppel-Toggle
       t.addEventListener("click", () => {
         const gid = t.dataset.groupToggle;
         const body = el.querySelector(`[data-group-body="${gid}"]`);
@@ -551,7 +554,8 @@
         body.dataset.collapsed = nowCollapsed ? "1" : "0";
         t.setAttribute("aria-expanded", nowCollapsed ? "false" : "true");
         localStorage.setItem(`sidebar:collapsed:${gid}`, nowCollapsed ? "1" : "0");
-      }));
+      });
+    });
 
     el.querySelectorAll("[data-act]").forEach((a) =>
       a.addEventListener("click", async (ev) => {
