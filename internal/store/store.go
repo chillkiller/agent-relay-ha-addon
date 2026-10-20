@@ -51,6 +51,8 @@ type Room struct {
 	Kind           string   `json:"kind"` // "chat" | "project" (project rooms carry the task board)
 	HumanMember    bool     `json:"humanMember"` // operator participation; false = room hidden from sidebar
 	Position       int      `json:"position"` // manual sort order (drag&drop, review-7 B3)
+	Topic          string   `json:"topic,omitempty"` // P1#8: Raum-Thema (buzz channel topic)
+	PinnedMessageID *string `json:"pinnedMessageId,omitempty"` // P1#10-Rest: ge-pinnte Nachricht je Raum
 	ProjectID      *string  `json:"projectId"` // legacy link; project-kind rooms are the room themselves
 	CreatedAt      string   `json:"createdAt"`
 	UpdatedAt      string   `json:"updatedAt"`
@@ -191,6 +193,20 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.position alter: %w", err)
 		}
 	}
+	// P1#8 + P1#10-Rest (Codex-Matrix 1.8/2.10): Thema + Pinned-Message
+	// (buzz set_channel_topic-Idiom / pinned-messages-Idiom).
+	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN topic TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("rooms.topic alter: %w", err)
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE rooms ADD COLUMN pinned_message_id TEXT`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("rooms.pinned_message_id alter: %w", err)
+		}
+	}
 	// P2#2 (Codex-Matrix 2.2): approval_gate pro Agent (Turn-Halt vor Stream).
 	if _, err := db.Exec(`ALTER TABLE agents ADD COLUMN approval_gate INTEGER NOT NULL DEFAULT 0`); err != nil {
 		msg := err.Error()
@@ -290,6 +306,8 @@ CREATE TABLE IF NOT EXISTS rooms (
   kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat','project','dm')),
   human_member INTEGER NOT NULL DEFAULT 1,
   position INTEGER NOT NULL DEFAULT 0,
+  topic TEXT NOT NULL DEFAULT '',
+  pinned_message_id TEXT,
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );

@@ -267,7 +267,7 @@ func (d *DB) DeleteProject(id string) error {
 // ── rooms ───────────────────────────────────────────────────────────
 
 func (d *DB) ListRooms() ([]*Room, error) {
-	rows, err := d.db.Query(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at,
+	rows, err := d.db.Query(`SELECT id,name,kind,human_member,position,pinned_message_id,topic,project_id,created_at,updated_at,
 			COALESCE((SELECT content FROM messages m WHERE m.room_id = rooms.id AND m.status != 'deleted' ORDER BY created_at DESC LIMIT 1), '')
 			FROM rooms ORDER BY position,created_at`)
 	if err != nil {
@@ -278,15 +278,19 @@ func (d *DB) ListRooms() ([]*Room, error) {
 	byID := map[string]*Room{}
 	for rows.Next() {
 		r := &Room{}
-		var pid sql.NullString
+		var pid, pinned sql.NullString
 		var hm, pos int
-		var lastMsg string
-		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt, &lastMsg); err != nil {
+		var lastMsg, topic string
+		if err := rows.Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pinned, &topic, &pid, &r.CreatedAt, &r.UpdatedAt, &lastMsg); err != nil {
 			return nil, err
 		}
 		r.HumanMember = hm == 1
 		r.Position = pos
+		r.Topic = topic
 		r.LastMessage = lastMsg // Row-Subtitle-Digest (Matrix-22)
+		if pinned.Valid {
+			r.PinnedMessageID = &pinned.String
+		}
 		if pid.Valid {
 			r.ProjectID = &pid.String
 		}
@@ -331,12 +335,17 @@ func (d *DB) ListRooms() ([]*Room, error) {
 
 func (d *DB) GetRoom(id string) (*Room, error) {
 	r := &Room{}
-	var pid sql.NullString
+	var pid, pinned sql.NullString
 	var hm, pos int
-	err := d.db.QueryRow(`SELECT id,name,kind,human_member,position,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pid, &r.CreatedAt, &r.UpdatedAt)
+	var topic string
+	err := d.db.QueryRow(`SELECT id,name,kind,human_member,position,pinned_message_id,topic,project_id,created_at,updated_at FROM rooms WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.Kind, &hm, &pos, &pinned, &topic, &pid, &r.CreatedAt, &r.UpdatedAt)
 	r.HumanMember = hm == 1
 	r.Position = pos
+	r.Topic = topic
+	if pinned.Valid {
+		r.PinnedMessageID = &pinned.String
+	}
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -367,10 +376,6 @@ func (d *DB) InsertRoom(r *Room) error {
 	if err != nil {
 		return err
 	}
-	var pid any
-	if r.ProjectID != nil && *r.ProjectID != "" {
-		pid = *r.ProjectID
-	}
 	kind := r.Kind
 	if kind == "" {
 		kind = "chat"
@@ -379,8 +384,8 @@ func (d *DB) InsertRoom(r *Room) error {
 	if !r.HumanMember {
 		hm = 0
 	}
-	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,position,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`,
-		r.ID, r.Name, kind, hm, r.Position, pid, r.CreatedAt, r.UpdatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,position,topic,pinned_message_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Name, kind, hm, r.Position, r.Topic, nil, r.CreatedAt, r.UpdatedAt); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -406,8 +411,12 @@ func (d *DB) UpdateRoom(r *Room) error {
 	if !r.HumanMember {
 		hm = 0
 	}
-	if _, err := tx.Exec(`UPDATE rooms SET name=?, kind=?, human_member=?, position=?, project_id=?, updated_at=? WHERE id=?`,
-		r.Name, r.Kind, hm, r.Position, pid, now(), r.ID); err != nil {
+	var pm any
+	if r.PinnedMessageID != nil && *r.PinnedMessageID != "" {
+		pm = *r.PinnedMessageID
+	}
+	if _, err := tx.Exec(`UPDATE rooms SET name=?, kind=?, human_member=?, position=?, topic=?, pinned_message_id=?, project_id=?, updated_at=? WHERE id=?`,
+		r.Name, r.Kind, hm, r.Position, r.Topic, pm, pid, now(), r.ID); err != nil {
 		tx.Rollback()
 		return err
 	}

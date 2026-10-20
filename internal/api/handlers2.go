@@ -123,6 +123,9 @@ type roomBody struct {
 	AgentIDs  []string `json:"agentIds"`
 	// member endpoints:
 	AgentID string `json:"agentId"`
+	// P1#8 / P2#10-Rest:
+	Topic   string `json:"topic,omitempty"`            // Raum-Thema (buzz channel topic)
+	PinnedMessageID string `json:"pinnedMessageId,omitempty"` // pin/unpin (leer = unpin)
 }
 
 func (s *Server) listRooms(w http.ResponseWriter, _ *http.Request) {
@@ -255,6 +258,22 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 	// otherwise the loaded roster is preserved
 	if fieldPresent(raw, "agentIds") && b.AgentIDs != nil {
 		room.MemberAgentIDs = b.AgentIDs
+	}
+	// P1#8: topic-Feld (immer setzen wenn present; leer = löschen)
+	if fieldPresent(raw, "topic") {
+		room.Topic = strings.TrimSpace(b.Topic)
+	}
+	// P2#10-Rest: pin/unpin — leer = unpin; gültige msg-ID im selben Raum = pin
+	if fieldPresent(raw, "pinnedMessageId") {
+		pid := strings.TrimSpace(b.PinnedMessageID)
+		if pid == "" {
+			room.PinnedMessageID = nil
+		} else if msg, _ := s.st.GetMessage(pid); msg != nil && msg.RoomID == id {
+			room.PinnedMessageID = &pid
+		} else {
+			errJSON(w, 400, "pinnedMessageId muss eine Nachricht im selben Raum sein")
+			return
+		}
 	}
 	room.UpdatedAt = nowISO()
 	if err := s.st.UpdateRoom(room); err != nil {

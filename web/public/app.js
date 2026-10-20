@@ -644,6 +644,7 @@
     $("#activeRoomName").textContent = room?.name ?? "";
     updateBoardBadge(room);
     renderMemberChips(room);
+    renderPinnedBanner(id);
     const isProject = room?.kind === "project";
     $("#roomTabs").style.display = isProject ? "inline-flex" : "none";
     document.querySelectorAll(".room-tab").forEach((t) =>
@@ -1078,6 +1079,25 @@
     }
     if (parentId) clearThreadMode();
   });
+  function renderPinnedBanner(roomId) {
+    const wrap = $("#pinnedBanner");
+    if (!wrap) return;
+    const room = state.rooms.find((r) => r.id === roomId);
+    const pid = room?.pinnedMessageId;
+    const m = pid ? state.messages[pid] : null;
+    if (!pid || !m) { wrap.hidden = true; wrap.innerHTML = ""; return; }
+    wrap.hidden = false;
+    wrap.innerHTML = '<span class="pb-ico">📌</span><span class="pb-text">'
+      + esc((m.content || "").replace(/\s+/g, " ").slice(0, 140))
+      + '</span><button type="button" class="pb-x" title="Lospinen">✕</button>';
+    wrap.querySelector(".pb-x").addEventListener("click", async () => {
+      try {
+        await api("PATCH", `/api/rooms/${roomId}`, { pinnedMessageId: "" });
+        await loadRooms();
+        renderPinnedBanner(roomId);
+      } catch (err) { toast(err.message); }
+    });
+  }
   function clearThreadMode() {
     state.threadMode = null;
     const chip = $("#threadChip");
@@ -1673,6 +1693,18 @@
     if (!room) return toast("Erst einen Raum wählen");
     openPopover($("#roomMenu"), room.name, [
       { label: "✏️ Umbenennen", run: () => renameRoomModal(room) },
+      { label: room.pinnedMessageId ? "📌 Lospinen" : "📌 Letzte Nachricht anpinnen", run: async () => {
+        const lastId = Object.values(state.messages)
+          .filter((m) => m.roomId === room.id && m.senderKind !== "system")
+          .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))[0]?.id || "";
+        const id = room.pinnedMessageId ? "" : lastId;
+        if (!room.pinnedMessageId && !lastId) { toast("Keine Nachricht zum Anpinnen"); return; }
+        try {
+          await api("PATCH", `/api/rooms/${room.id}`, { pinnedMessageId: id });
+          await loadRooms();
+          renderPinnedBanner(room.id);
+        } catch (err) { toast(err.message); }
+      } },
       { label: room.kind === "project" ? "💬 In Chat-Raum umwandeln" : "🗂 In Projekt-Raum umwandeln",
         run: async () => {
           await api("PATCH", `/api/rooms/${room.id}`, { kind: room.kind === "project" ? "chat" : "project" });
@@ -1692,8 +1724,9 @@
   function renameRoomModal(room) {
     openModal("Raum umbenennen", [
       { label: "Name", name: "name", type: "text", value: room.name, required: true },
+      { label: "Thema (optional)", name: "topic", type: "text", value: room.topic || "" },
     ], async (form) => {
-      await api("PATCH", `/api/rooms/${room.id}`, { name: form.name.value });
+      await api("PATCH", `/api/rooms/${room.id}`, { name: form.name.value, topic: form.topic?.value || "" });
       await loadRooms(); await selectRoom(room.id);
       return true;
     });
