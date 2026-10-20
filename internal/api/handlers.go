@@ -403,6 +403,9 @@ func (s *Server) patchAgent(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, err.Error())
 		return
 	}
+	// Sprint-4 (Matrix-4): Agent-Roster-Änderungen (Enable-Toggle) als
+	// WS-Event — SPA aktualisiert Presence-Dots ohne Poll.
+	broadcast(map[string]any{"type": "agents.changed", "agentId": id, "enabled": existing.Enabled, "ts": time.Now().UnixMilli()})
 	writeJSON(w, 200, existing)
 }
 

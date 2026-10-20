@@ -766,6 +766,16 @@ body {
 /* design(v2): presence-dot at room rows + @-mention chips */
 .room-presence { width:6px; height:6px; border-radius:50%; background:var(--line-2); flex:none; margin-right:2px; }
 .room-presence.on { background:var(--ok); box-shadow:0 0 6px color-mix(in srgb, var(--ok) 50%, transparent); }
+/* Sprint-4 (Matrix-4): 3. Zustand idle = amber (OpenClaw --presence-idle) */
+.room-presence.idle { background:var(--warn); box-shadow:0 0 6px color-mix(in srgb, var(--warn) 45%, transparent); }
+.roster-chip .presence.idle { background:var(--warn); }
+.roster-chip.off .name, .roster-chip.off { color:var(--ink-4); }
+/* Sprint-4 (Matrix-5): Avatar-Materialität nach Presence (control-ui-core:
+   saturate/opacity-Stufen) */
+.roster-chip .avatar { transition: filter .15s, opacity .15s; }
+.roster-chip .avatar.p-idle { filter: saturate(.6); opacity:.85; }
+.roster-chip .avatar.p-off { filter: saturate(.4); opacity:.55; }
+.roster-chip .avatar.p-online { filter: none; opacity:1; }
 .mention-chip { display:inline-flex; align-items:center; background:var(--s3); border:1px solid var(--line); border-radius:var(--r-pill); padding:1px 7px; font-size:12.5px; font-weight:600; color:var(--accent); white-space:nowrap; }
 .msg .mention-chip { vertical-align:middle; }
 

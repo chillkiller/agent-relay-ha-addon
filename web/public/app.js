@@ -136,12 +136,15 @@
         if (!e.message || e.message.roomId !== state.currentRoomId) break;
         state.messages[e.message.id] = e.message;
         streamBuf[e.message.id] = "";
+        markAgentActive(e.message.agentId);
+        renderRoomList();
         // Sprint-3b: Turn-Laufzeit-Chronometer (Worked-for-Head, Matrix-12)
         turnTimers[e.message.id] = { t0: Date.now(), tokens: 0 };
         renderMessages();
         break;
       }
       case "typing": {
+        markAgentActive(e.agentId); // Sprint-4: Typing = Activity-Glimmen
         if (e.roomId !== state.currentRoomId) break;
         renderTyping(e.agentName);
         clearTimeout(typingTimers[e.agentId]);
@@ -178,10 +181,20 @@
           renderMessages();
         }
         if (e.message?.agentId) {
+          markAgentActive(e.message.agentId);
+          renderRoomList();
           clearTimeout(typingTimers[e.message.agentId]);
           delete typingTimers[e.message.agentId];
           renderTyping();
         }
+        break;
+      }
+      case "agents.changed": {
+        // Sprint-4 (Matrix-4): Enable-Toggle live in Roster+Karten+Room-Dots
+        // spiegeln, ohne Poll — loadAgents rendert Roster/Karten/Chips,
+        // renderRoomList die Raum-Dots aus der neuen Presence-Ableitung
+        loadAgents();
+        renderRoomList();
         break;
       }
       case "rooms.changed": loadRooms(); break;
@@ -288,8 +301,12 @@
     const ghost = state.rooms.filter((r) => r.humanMember === false);
     const item = (r) => {
       const mIds = r.memberAgentIds || r.agentIds || [];
-      const hasActive = mIds.some((id) => state.agents.find((ag) => ag.id === id && ag.enabled));
-      const dot = `<span class="room-presence ${hasActive ? "on" : ""}${r.unread ? " unread" : ""}" aria-hidden="true"></span>`;
+      // Sprint-4 (Matrix-4): Room-Dot leitet aus Member-Presence ab —
+      // "on" wenn ein Member online, "idle" wenn nur idle-Member
+      const presences = mIds.map((id) => state.agents.find((ag) => ag.id === id && ag.enabled))
+        .filter(Boolean).map(agentPresence);
+      const dotState = presences.includes("online") ? "on" : (presences.includes("idle") ? "idle" : "");
+      const dot = `<span class="room-presence ${dotState}${r.unread ? " unread" : ""}" aria-hidden="true"></span>`;
       // Model v2: dm = privé-marker; projekt-bezug = 🗂-mini-badge
       const ico = r.kind === "dm" ? "🔒" : (r.projectId ? "🗂" : "#");
       // Row-Subtitle (Matrix-22): Digest- Zeile, einzeilig ellipsiert
@@ -332,8 +349,8 @@
       const teamHtml = (() => {
         const gid = "team"; const collapsed = isCollapsed(gid);
         const chips = [
-          `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du)"><span class="avatar" style="background:var(--ok)">G</span>du<span class="presence"></span></span>`,
-          ...state.agents.map((a) => `<span class="roster-chip ${a.enabled ? "" : "idle"}" draggable="true" data-agent="${a.id}"><span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence"></span></span>`),
+          `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du)"><span class="avatar" style="background:var(--ok)">G</span>du<span class="presence on"></span></span>`,
+          ...state.agents.map((a) => { const p = agentPresence(a); return `<span class="roster-chip ${p === "off" ? "off" : p === "idle" ? "idle" : ""}" draggable="true" data-agent="${a.id}" title="${a.name}: ${p === "online" ? "online" : p}"><span class="avatar p-${p}" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence ${p === "off" ? "" : p}"></span></span>`; }),
         ].join("");
         return `<div class="nav-group" data-group="${gid}" aria-expanded="${collapsed ? "false" : "true"}">
           <button class="nav-group-head" data-group-toggle="${gid}"><span class="chev">${collapsed ? "▸" : "▾"}</span>Team <span class="badge" style="margin-left:auto;font-size:11px;color:var(--ink-4)">${state.agents.length + 1}</span></button>
@@ -523,6 +540,18 @@
   // Sprint-3b: Turn-Chronometrie (Matrix-12, "Worked for…"-Fold)
   const turnTimers = {};
   const turnStats = {};
+  // Sprint-4 (Matrix-4): Agent-Aktivität je Raum-Fenster für Presence-
+  // Ableitung — idle = enabled UND >=90 s ohne Turn; online sonst; off
+  // (disabled) überschreibt beides. WS-geboren (agents.changed/typing),
+  // kein Poll (buzz presence/hooks.ts-Muster).
+  const agentActivity = {};
+  function markAgentActive(id) { if (id) agentActivity[id] = Date.now(); }
+  function agentPresence(a) {
+    if (!a.enabled) return "off";
+    const act = agentActivity[a.id];
+    if (!act) return "idle";
+    return Date.now() - act < 90000 ? "online" : "idle";
+  }
 
   async function loadMessages() {
     if (!state.currentRoomId) return;
@@ -867,11 +896,15 @@
     if (!list) return;
     list.innerHTML = [
       `<span class="roster-chip" data-agent="${HUMAN}" draggable="true" title="In einen Raum ziehen (du) oder hierher zurück = Raum verlassen">
-        <span class="avatar" style="background:var(--ok)">G</span>du<span class="presence"></span></span>`,
-      ...state.agents.map((a) => `
-        <span class="roster-chip ${a.enabled ? "" : "idle"}" draggable="true" data-agent="${a.id}" title="In einen Raum ziehen (${a.enabled ? "online" : "aus"})">
-          <span class="avatar" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence"></span>
-        </span>`),
+        <span class="avatar" style="background:var(--ok)">G</span>du<span class="presence on"></span></span>`,
+      ...state.agents.map((a) => {
+        // Sprint-4 (Matrix-4/5): Presence-3-Zustand + Avatar-Dimming
+        const p = agentPresence(a);
+        return `
+        <span class="roster-chip ${p}" draggable="true" data-agent="${a.id}" title="${esc(a.name)}: ${p === "online" ? "online" : p === "idle" ? "idle" : "aus"}">
+          <span class="avatar p-${p}" style="background:${esc(a.color)}">${esc(a.emoji)}</span>${esc(a.name)}<span class="presence ${p === "off" ? "" : p}"></span>
+        </span>`;
+      }),
     ].join("");
     list.querySelectorAll('[draggable="true"]').forEach((chip) => {
       chip.addEventListener("dragstart", (ev) => {
