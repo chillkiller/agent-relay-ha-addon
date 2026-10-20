@@ -404,7 +404,7 @@
   // ═════════════════════════════════════════════════════════════════
   function switchView(view) {
     state.view = view;
-    for (const v of ["chat", "agents", "projects", "settings", "dashboard", "audit"]) {
+    for (const v of ["chat", "agents", "projects", "settings", "dashboard", "audit", "logbook"]) {
       $(`#view-${v}`).hidden = v !== view;
     }
     document.querySelectorAll(".nav-btn").forEach((b) =>
@@ -414,6 +414,7 @@
     if (view === "projects") loadProjectsView();
     if (view === "settings") renderSettingsForm();
     if (view === "audit") loadAudit();
+    if (view === "logbook") loadLogs();
     document.body.classList.remove("sidebar-open");
   }
 
@@ -1974,6 +1975,16 @@
     if (Array.isArray(data)) state.audit = data;
     if (state.view === "audit") renderAudit();
   }
+  // Logs-Ansicht (GaRoN-Menü 21:50): API-Ring (Operations-Ansicht, newest first)
+  async function loadLogs() {
+    const data = await api("GET", "/api/logs").catch(() => null);
+    const list = $("#logList");
+    if (!list) return;
+    if (!Array.isArray(data)) { list.innerHTML = `<div class="audit-empty">⚠️ Logs nicht ladbar.</div>`; return; }
+    list.innerHTML = data.length
+      ? data.slice().reverse().map((l) => `<div class="log-row mono">${esc(l)}</div>`).join("")
+      : `<div class="audit-empty">— noch keine API-Zugriffe —</div>`;
+  }
   function renderAudit() {
     const list = $("#auditList");
     if (!list) return;
@@ -2116,6 +2127,7 @@
       if (act === "newRoom") openNewRoom();
       else if (act === "newAgent") agentModal();
       else if (act === "notify") toggleNotify();
+      else if (act === "goals") { switchView("projects"); } // Ziele = Projekte-Board (GaRoN-Menü 21:50: „Verwaltung · Ziele“)
       else if (act) switchView(act);
     }));
     document.addEventListener("mousedown", (ev) => { if (!menu.hidden && !card.contains(ev.target) && !menu.contains(ev.target)) close(); });

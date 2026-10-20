@@ -49,12 +49,13 @@
         </button>
         <div class="user-menu" id="userMenu" role="menu" hidden>
           <div class="menu-head">Menü</div>
-          <button data-user-act="chat">💬 Räume</button>
-          <button data-user-act="agents">🤖 Agents verwalten</button>
-          <button data-user-act="projects">🗂 Projekte</button>
-          <button data-user-act="settings">⚙️ Einstellungen</button>
           <button data-user-act="dashboard">📊 Übersicht</button>
-          <button data-user-act="audit">🧾 Audit-Register</button>
+          <button data-user-act="agents">🤖 Verwaltung · Agents</button>
+          <button data-user-act="chat">💬 Verwaltung · Räume</button>
+          <button data-user-act="projects">🗂 Verwaltung · Projekte</button>
+          <button data-user-act="goals">🎯 Verwaltung · Ziele (Projekte-Board)</button>
+          <button data-user-act="settings">⚙️ Einstellungen</button>
+          <button data-user-act="logbook">🧾 Logs</button>
           <div class="menu-sep"></div>
           <button data-user-act="notify" id="notifyToggle">🔔 Benachrichtigungen: aus</button>
         </div>
@@ -137,7 +138,7 @@
         <div class="dash-grid" id="dashGrid"></div>
       </section>
 
-      <!-- Audit-Register (P3#4) -->
+      <!-- Audit-Register (P3#4) + Logs (GaRoN-Menü 21:50) -->
   <section class="view" id="view-audit" hidden>
     <header class="view-head">
       <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
@@ -147,6 +148,14 @@
     <p class="hint" style="padding:0 16px;">Append-only Hash-Kette (sha256 über seq|Aktion|Aktor|Subjekt|Detail|Vorgänger-Hash). Manipulation bricht die Kette — kein stiller Beweis-Verlust.</p>
     <div id="auditVerifyOut" class="audit-verify" role="status"></div>
     <div id="auditList" class="audit-list"></div>
+  </section>
+  <section class="view" id="view-logbook" hidden>
+    <header class="view-head">
+      <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
+      <h2>Logs</h2>
+      <span class="mono" style="margin-left:auto;font-size:11px;color:var(--ink-4)">API-Ring · 500 cap</span>
+    </header>
+    <div id="logList" class="audit-list log-list"></div>
   </section>
   <section class="view" id="view-settings" hidden>
         <header class="view-head">

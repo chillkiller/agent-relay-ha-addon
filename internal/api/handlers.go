@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -34,7 +35,8 @@ type Server struct {
 	dataDir string // attachment storage root (P1#2); empty = uploads disabled
 	mu      sync.RWMutex
 	subs    map[*sub]bool
-	bearer  string // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
+	bearer  string     // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
+	logs    [][]string // GaRoN-Menü „Logs“ (21:50): Ring-Buffer je API-Zugriff (in-memory, 500 cap)
 }
 
 func New(st *store.DB, rt *runtime.Runtime, dataDir string) *Server {
@@ -178,6 +180,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/approvals", s.listApprovals)
 	mux.HandleFunc("GET /api/audit", s.listAudit)
 	mux.HandleFunc("GET /api/audit/verify", s.verifyAudit)
+	mux.HandleFunc("GET /api/logs", s.listLogs)
 	mux.HandleFunc("POST /api/approvals/{id}/grant", s.decideApprovalGranted)
 	mux.HandleFunc("POST /api/approvals/{id}/deny", s.decideApprovalDenied)
 	mux.HandleFunc("GET /api/rooms/{id}/search", s.searchMessages)
@@ -194,8 +197,36 @@ func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("[api] %s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+		line := fmt.Sprintf("%s %s %s·%s", time.Now().UTC().Format("15:04:05"), r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+		log.Printf("[api] %s", line)
+		ringAPI(line) // GaRoN-Menü „Logs“ (21:50): auch im Ring sammeln
 	})
+}
+
+// apiLogRing + ringAPI: in-memory API-Log (500 Zeilen, FIFO) für die Logs-
+// Ansicht im Menü — Beweis-Schicht läuft in audit_events (Kette) weiter;
+// dies hier ist die Operations-Ansicht (was WAR, nicht was GILT).
+var (
+	apiLogMu   sync.Mutex
+	apiLogRing []string // 500 cap, FIFO
+)
+
+func ringAPI(line string) {
+	apiLogMu.Lock()
+	apiLogRing = append(apiLogRing, line)
+	if len(apiLogRing) > 500 {
+		apiLogRing = apiLogRing[len(apiLogRing)-500:]
+	}
+	apiLogMu.Unlock()
+}
+
+// listLogs serves the ring (newest last → logs-view rendert newest-first).
+func (s *Server) listLogs(w http.ResponseWriter, _ *http.Request) {
+	apiLogMu.Lock()
+	out := make([]string, len(apiLogRing))
+	copy(out, apiLogRing)
+	apiLogMu.Unlock()
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) SetBearer(tok string) { s.bearer = tok }

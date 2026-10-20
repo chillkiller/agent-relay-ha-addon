@@ -1088,6 +1088,10 @@ html[data-theme="light"] {
 .audit-verify .a-bad { color: var(--danger); font-weight: 600; }
 #auditVerifyBtn { flex-shrink: 0; margin-left: auto; }
 
+/* Logs-Ansicht (GaRoN-Menü 21:50) */
+.log-row { padding: 4px 10px; font-size: 11.5px; color: var(--ink-3); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-list { gap: 0; }
+
 /* P3#4-Demo-Fix (GaRoN 20:16): zugeklappte Sidebar klemmte den Reveal-Button
    in der 0px-Säule fest (side-head ist IN #sidebar, overflow:hidden clippt
    alles). Der Button wird im collapsed-Zustand fixed links oben gepinnt —
