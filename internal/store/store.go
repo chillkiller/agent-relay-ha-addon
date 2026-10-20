@@ -84,6 +84,12 @@ type Attachment struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+type RoomRead struct {
+	RoomID     string `json:"roomId"`
+	Reader     string `json:"reader"`
+	LastReadAt string `json:"lastReadAt"`
+}
+
 type TaskComment struct {
 	ID        string `json:"id"`
 	TaskID    string `json:"taskId"`
@@ -353,6 +359,14 @@ CREATE TABLE IF NOT EXISTS approvals (
   consumed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_pending ON approvals(status, created_at);
+-- Read-State authoritativ (P1#10, paperclip sidebar-badges): je Raum+Reader
+-- der Marken-Zeitstempel; unread = COUNT(messages.created_at > last_read).
+CREATE TABLE IF NOT EXISTS room_reads (
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  reader TEXT NOT NULL DEFAULT 'human',
+  last_read_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, reader)
+);
 `)
 	return err
 }

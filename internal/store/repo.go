@@ -684,6 +684,48 @@ func (d *DB) ListTaskComments(taskID string) ([]*TaskComment, error) {
 	return out, rows.Err()
 }
 
+// ── room reads (P1#10 authoritativ) ─────────────────────────────────
+
+func (d *DB) MarkRoomRead(roomID, reader, at string) error {
+	_, err := d.db.Exec(`INSERT INTO room_reads (room_id,reader,last_read_at) VALUES (?,?,?)
+		ON CONFLICT(room_id,reader) DO UPDATE SET last_read_at=excluded.last_read_at`, roomID, reader, at)
+	return err
+}
+
+func (d *DB) GetRoomRead(roomID, reader string) (string, error) {
+	var at string
+	err := d.db.QueryRow(`SELECT last_read_at FROM room_reads WHERE room_id=? AND reader=?`, roomID, reader).Scan(&at)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return at, err
+}
+
+// UnreadBatch: map[roomID]→ungelesene Nachrichten (nach Marken-Zeit je
+// Reader; 1 Query je Raum-Fenster — batched über rooms).
+func (d *DB) UnreadBatch(reader string) (map[string]int, error) {
+	rows, err := d.db.Query(`
+		SELECT r.id, COUNT(m.id)
+		FROM rooms r
+		LEFT JOIN room_reads rr ON rr.room_id = r.id AND rr.reader = ?
+		LEFT JOIN messages m ON m.room_id = r.id AND m.created_at > COALESCE(rr.last_read_at, '1970-01-01T00:00:00Z') AND m.sender_kind != 'system'
+		GROUP BY r.id`, reader)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var rid string
+		var c int
+		if err := rows.Scan(&rid, &c); err != nil {
+			return nil, err
+		}
+		out[rid] = c
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) GetApproval(id string) (*Approval, error) {
 	row := d.db.QueryRow(`SELECT id,agent_id,user_msg_id,reason,status,created_at,decided_at,consumed_at FROM approvals WHERE id=?`, id)
 	a := &Approval{}

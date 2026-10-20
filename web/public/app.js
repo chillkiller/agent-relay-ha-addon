@@ -620,10 +620,13 @@
     state.currentRoomId = id;
     state.activeTab = "chat";
     state.lastMetaKey = "";
-    // Read-Marker (Matrix-3): Öffnen markiert gelesen — Dot/Zähler erlischen
+    // Read-Marker (Matrix-3): Öffnen markiert gelesen — jetzt AUTHORITATIV
+    // (server room_reads; localStorage bleibt Fallback-Schicht): Reload-
+    // überlebende Zähler (Befund P1#10 — client-only Zähler starben).
     state.lastRead[id] = Date.now();
     try { localStorage.setItem(`relay.lastRead.${id}`, String(state.lastRead[id])); } catch {}
     delete state.rooms.find((r) => r.id === id)?.unread;
+    api("POST", `/api/rooms/${id}/read`).catch(() => {});
     state.newBelow = 0; updateNewPill();
     // Sprint-3a: Draft des Raums wiederherstellen (Matrix-9)
     const draft = restoreDraft(id);
@@ -1745,6 +1748,7 @@
         const r = state.rooms.find((x) => x.id === state.currentRoomId);
         if (r) { delete r.unread; state.lastRead[r.id] = Date.now();
           try { localStorage.setItem(`relay.lastRead.${r.id}`, String(Date.now())); } catch {}
+          api("POST", `/api/rooms/${r.id}/read`).catch(() => {}); // P1#10
         }
         renderRoomList();
       }
@@ -1874,6 +1878,7 @@
     } catch { state.adapters = ["echo"]; }
     restoreLastRead();
     updateNotifyLabel();
+
     // P2#2: Pendings beim Boot laden (sonst ist das Banner nach Reload leer,
     // obwohl WS-Events während der Abwesenheit pendende Freigaben hinterließen)
     api("GET", "/api/approvals?status=pending").then((aps) => {
@@ -1881,8 +1886,25 @@
       renderApprovalBanner();
     }).catch(() => {});
     await Promise.all([loadRooms(), loadAgents()]);
+    // P1#10 (authoritativ): server-Wahrheit NACH rooms-Load anwenden —
+    // Reload-feste Unread-Badges (client-only Zähler starben beim Reload).
+    await applyServerUnreads();
     if (state.rooms.length) selectRoom(state.rooms[0].id);
     connectWS();
+  }
+  async function applyServerUnreads() {
+    try {
+      const m = await api("GET", "/api/unread");
+      for (const [rid, c] of Object.entries(m || {})) {
+        if (c <= 0) continue;
+        const r = state.rooms.find((x) => x.id === rid);
+        if (!r) continue;
+        // ehrliche Mischung: WS-geborene client-Zähler (frisch) schlagen
+        // server nicht unter; Boot-Fälle (kein client-Zähler) = server
+        r.unread = Math.max(r.unread || 0, c);
+      }
+      renderRoomList();
+    } catch {}
   }
   boot();
 })();

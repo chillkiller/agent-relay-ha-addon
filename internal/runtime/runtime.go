@@ -102,10 +102,16 @@ func (r *Runtime) OnUserMessage(m *store.Message) {
 		return
 	}
 
-	targets := mentioned(m.Content, agents)
-	hits := len(targets)
-	if hits == 0 {
+	// P1#9 (Codex-Matrix): "@all" expandiert zu ALLEN Raum-Members;
+	// sonst Mention-Match; ohne jeden Treffer = alle (bisheriges Verhalten).
+	var targets []*store.Agent
+	if strings.Contains(strings.ToLower(m.Content), "@all") {
 		targets = agents
+	} else {
+		targets = mentioned(m.Content, agents)
+		if len(targets) == 0 {
+			targets = agents
+		}
 	}
 
 	for i, a := range targets {

@@ -721,6 +721,27 @@ func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, c)
 }
 
+// ── unread authoritativ (P1#10) ─────────────────────────────────────
+
+func (s *Server) markRoomRead(w http.ResponseWriter, r *http.Request) {
+	at := nowISO()
+	if err := s.st.MarkRoomRead(r.PathValue("id"), "human", at); err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "rooms.changed", "ts": time.Now().UnixMilli()})
+	writeJSON(w, 200, map[string]any{"ok": true, "at": at})
+}
+
+func (s *Server) listUnread(w http.ResponseWriter, _ *http.Request) {
+	m, err := s.st.UnreadBatch("human")
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	writeJSON(w, 200, m)
+}
+
 // getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
 func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := s.st.GetMessage(r.PathValue("id"))
