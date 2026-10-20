@@ -158,6 +158,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/messages/{id}/reactions", s.addReaction)
 	mux.HandleFunc("DELETE /api/messages/{id}/reactions/{emoji}", s.removeReaction)
 	mux.HandleFunc("POST /api/rooms/{id}/read", s.markRoomRead)
+	mux.HandleFunc("GET /api/dashboard", s.dashboardAggregates)
 	mux.HandleFunc("GET /api/unread", s.listUnread)
 	mux.HandleFunc("GET /api/tasks/{id}/comments", s.listTaskComments)
 	mux.HandleFunc("POST /api/tasks/{id}/comments", s.addTaskComment)

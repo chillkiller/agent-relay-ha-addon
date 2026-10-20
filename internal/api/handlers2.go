@@ -761,7 +761,90 @@ func (s *Server) listUnread(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, m)
 }
 
-// ── routines (P2#4, paperclip routines.ts) ──────────────────────────
+// ── dashboard (P2#9, paperclip dashboard.ts/status-cards.ts) ────────
+// Vertrag: "what is happening → does it need me → what do I do about it"
+
+func (s *Server) dashboardAggregates(w http.ResponseWriter, _ *http.Request) {
+	out := map[string]any{}
+	// needs-you-Fläche: pending approvals (höchste Priorität — hält Turns an)
+	aps, err := s.st.ListApprovals("pending")
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	out["pendingApprovals"] = aps
+	// unread-Summe (needs-you: ungelesene fremde Nachrichten)
+	un, err := s.st.UnreadBatch("human")
+	if err != nil {
+		un = map[string]int{}
+	}
+	total := 0
+	for _, c := range un {
+		total += c
+	}
+	out["unreadTotal"] = total
+	// agents: online/idle/off-Stände (what-is-happening)
+	agents, _ := s.st.ListAgents()
+	ac := map[string]int{"online": 0, "idle": 0, "off": 0}
+	for _, a := range agents {
+		if !a.Enabled {
+			ac["off"]++
+		} else {
+			// v1: enabled = online-Kandidat; echte 90s-Aktivität ist client-
+			// seitig (WS-geboren) — server v1: enabled→online, sonst off
+			ac["online"]++
+		}
+	}
+	out["agents"] = ac
+	// tasks je Projekt (open/doing/done — projekt-kopfzeile)
+	projects, _ := s.st.ListProjects()
+	type projAgg struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Color    string `json:"color"`
+		Todo     int    `json:"todo"`
+		Doing    int    `json:"doing"`
+		Done     int    `json:"done"`
+		OpenTotal int   `json:"openTotal"`
+	}
+	pout := []projAgg{}
+	tasks, _ := s.st.ListTasks("")
+	for _, p := range projects {
+		agg := projAgg{ID: p.ID, Name: p.Name, Color: p.Color}
+		for _, t := range tasks {
+			if t.ProjectID == nil || *t.ProjectID != p.ID {
+				continue
+			}
+			switch t.Status {
+			case "todo":
+				agg.Todo++
+			case "doing":
+				agg.Doing++
+			case "done":
+				agg.Done++
+			}
+		}
+		agg.OpenTotal = agg.Todo + agg.Doing
+		pout = append(pout, agg)
+	}
+	out["projects"] = pout
+	// routines: nächste fällige (what-is-coming)
+	routines, _ := s.st.ListRoutines()
+	next := ""
+	for _, rt := range routines {
+		if !rt.Enabled {
+			continue
+		}
+		if next == "" || rt.NextRunAt < next {
+			next = rt.NextRunAt
+		}
+	}
+	out["nextRoutineAt"] = next
+	out["routinesActive"] = len(routines)
+	writeJSON(w, 200, out)
+}
+
+// getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
 
 // nextRoutineRun: nächste Ausführung nach cron (5-field) — api-Seite; brückt
 // den runtime-Parser (Export über runtime.CronNext wäre kreisfrei aber v1

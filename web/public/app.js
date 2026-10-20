@@ -399,12 +399,13 @@
   // ═════════════════════════════════════════════════════════════════
   function switchView(view) {
     state.view = view;
-    for (const v of ["chat", "agents", "projects", "settings"]) {
+    for (const v of ["chat", "agents", "projects", "settings", "dashboard"]) {
       $(`#view-${v}`).hidden = v !== view;
     }
     document.querySelectorAll(".nav-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.view === view));
     if (view === "agents") renderAgents();   /* R11-fix: Cards fehlen, wenn Load beim Inaktivsein lief */
+    if (view === "dashboard") renderDashboard();
     if (view === "projects") loadProjectsView();
     if (view === "settings") renderSettingsForm();
     document.body.classList.remove("sidebar-open");
@@ -2036,10 +2037,6 @@
     }
   }
 
-  boot();
-})();
-
-
   // ── P2#4: Routines-Panel (Settings-View; paperclip routines.ts) ──
   function renderRoutinesPanel() {
     let sec = $("#routinesPanel");
@@ -2105,3 +2102,54 @@
       return true;
     });
   }
+  // ── P2#9: Dashboard (paperclip status-cards-Vertrag) ──
+  async function renderDashboard() {
+    const d = await api("GET", "/api/dashboard").catch(() => null);
+    const el = $("#dashGrid");
+    if (!el) return;
+    if (!d) { el.innerHTML = `<div class="empty-state"><div class="big">📊</div>Übersicht nicht ladbar.</div>`; return; }
+    const needCards = [];
+    // needs-you: approvals mit Buttons (identische Karte wie Banner — Wiederverwendung!)
+    for (const ap of (d.pendingApprovals || [])) {
+      const ag = state.agents.find((x) => x.id === ap.agentId);
+      needCards.push(`
+        <div class="dash-card need" data-apid="${esc(ap.id)}">
+          <div class="dc-head"><span class="badge-pill ap-pill">● braucht dich</span><strong>${esc(ag ? ag.name : ap.agentId)}</strong></div>
+          <div class="dc-body">${esc(ap.reason || "")}</div>
+          <div class="ap-actions">
+            <button class="btn primary" data-apact="granted" data-apid="${esc(ap.id)}">Genehmigen</button>
+            <button class="btn danger" data-apact="denied" data-apid="${esc(ap.id)}">Ablehnen</button>
+          </div>
+        </div>`);
+    }
+    if ((d.unreadTotal || 0) > 0) {
+      needCards.push(`<div class="dash-card need"><div class="dc-head"><span class="badge-pill ap-pill">● ${d.unreadTotal} ungelesen</span></div><div class="dc-body">Ungelesene Nachrichten über Räume verteilt — Sidebar-Dots sind die Liste.</div></div>`);
+    }
+    // what-is-happening: agents-Trio + projects-Rows + next routine
+    const ag = d.agents || {};
+    const projRows = (d.projects || []).map((p) => `
+      <div class="dash-proj">
+        <span class="p-dot" style="background:${esc(p.color)}"></span>
+        <span class="dp-name">${esc(p.name)}</span>
+        <span class="dp-nums mono">${p.todo}/${p.doing}/${p.done}</span>
+        ${p.openTotal ? `<span class="dp-open">${p.openTotal} offen</span>` : `<span class="dp-ok">✅</span>`}
+      </div>`).join("") || `<div class="hint">— keine Projekte —</div>`;
+    const nextRt = d.nextRoutineAt ? new Date(d.nextRoutineAt).toLocaleString("de-DE", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—";
+    el.innerHTML = `
+      ${needCards.length ? `<div class="dash-need-grid">${needCards.join("")}</div>` : `<div class="dash-allclear">✅ Alles im Grün — nichts braucht dich.</div>`}
+      <div class="dash-card"><div class="dc-head"><strong>Agents</strong><span class="mono">${ag.online ?? 0} online · ${ag.off ?? 0} aus</span></div></div>
+      <div class="dash-card"><div class="dc-head"><strong>Projekte</strong></div><div class="dash-projs">${projRows}</div></div>
+      <div class="dash-card"><div class="dc-head"><strong>Routines</strong><span class="mono">${d.routinesActive ?? 0} aktiv</span></div><div class="dc-body">Nächster Lauf: ${esc(nextRt)}</div></div>`;
+    $("#dashStamp").textContent = "Stand " + new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // approval-Buttons im Dashboard = gleiche decision-Route (Wiederverwendung)
+    el.querySelectorAll("[data-apact]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api("POST", `/api/approvals/${b.dataset.apid}/${b.dataset.apact === "granted" ? "grant" : "deny"}`);
+          renderDashboard();
+        } catch (err) { toast(err.message); }
+      }));
+  }
+
+  boot();
+})();

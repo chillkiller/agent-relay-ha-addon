@@ -20,6 +20,7 @@
         <button class="nav-btn" data-view="agents"><span class="nav-ico">🤖</span>Agents</button>
         <button class="nav-btn" data-view="projects"><span class="nav-ico">🗂</span>Projekte</button>
         <button class="nav-btn" data-view="settings"><span class="nav-ico">⚙️</span>Einstellungen</button>
+        <button class="nav-btn" data-view="dashboard"><span class="nav-ico">📊</span>Übersicht</button>
       </nav>
 
       <!-- RÄUME + PROJEKTE: der Haupt-Inhalt (renderRoomList befüllt) -->
@@ -122,6 +123,14 @@
       </section>
 
       <!-- Einstellungen -->
+      <section class="view" id="view-dashboard" hidden>
+        <header class="view-head">
+          <h2>Übersicht</h2>
+          <span class="hint" id="dashStamp"></span>
+        </header>
+        <div class="dash-grid" id="dashGrid"></div>
+      </section>
+
       <section class="view" id="view-settings" hidden>
         <header class="view-head">
           <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
