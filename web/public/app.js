@@ -1189,6 +1189,11 @@
   $("#burger").addEventListener("click", () =>
     document.body.classList.toggle("sidebar-open"));
 
+  // Mobile-Back (GaRoN-Feedback 09:38): ← in Vollansichten = zurück zum Chat.
+  // Desktop-Verhalten identisch (konsistente Navigation, kein Sackgassen-Layout).
+  document.querySelectorAll(".view-back").forEach((b) =>
+    b.addEventListener("click", () => switchView("chat")));
+
   // quick-win 2: Chat-Suche mit live-Ergebnis-Popover
   function wireSearch() {
     const inp = $("#searchInput");

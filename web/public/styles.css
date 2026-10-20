@@ -553,6 +553,12 @@ body {
 }
 .view-head h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.2px; }
 .view-head .btn { margin-left: auto; }
+/* Mobile-Back (GaRoN-Feedback, Matrix-21-Nachbar): ← nur mobil sichtbar;
+   Desktop hat die Nav-Spalte permanent */
+.view-back { display: none; }
+@media (max-width: 860px) {
+  .view-back { display: inline-flex; }
+}
 
 .cards {
   flex: 1; overflow-y: auto; padding: var(--sp-5) var(--sp-6);

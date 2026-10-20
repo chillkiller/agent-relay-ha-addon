@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Agent Relay</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app">
@@ -95,6 +95,9 @@
       <!-- Agents (Team-Verwaltung) -->
       <section class="view" id="view-agents" hidden>
         <header class="view-head">
+          <!-- Mobile-Back (GaRoN-Feedback 09:38): Burger/← in jeder Vollansicht,
+               nicht nur im chat-head — kein Sackgassen-Layout mehr -->
+          <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
           <h2>Agents</h2>
           <button id="newAgentBtn" class="btn primary">＋ Agent anlegen</button>
         </header>
@@ -104,6 +107,7 @@
       <!-- Projekte (Launcher) -->
       <section class="view" id="view-projects" hidden>
         <header class="view-head">
+          <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
           <h2>Projekte</h2>
           <button id="newProjectBtn" class="btn primary">＋ Projekt-Raum</button>
         </header>
@@ -112,7 +116,10 @@
 
       <!-- Einstellungen -->
       <section class="view" id="view-settings" hidden>
-        <header class="view-head"><h2>Einstellungen</h2></header>
+        <header class="view-head">
+          <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
+          <h2>Einstellungen</h2>
+        </header>
         <form class="settings" id="settingsForm" autocomplete="off">
           <fieldset>
             <legend>Allgemein</legend>
@@ -141,6 +148,6 @@
   <div id="popLayer" hidden></div>
   <div id="modalWrap" class="modal-wrap" hidden><div id="modal" role="dialog" aria-modal="true"></div></div>
 
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
