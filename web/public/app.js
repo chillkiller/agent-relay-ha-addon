@@ -33,6 +33,50 @@
   // ── API (Bearer aus sessionStorage, 401 → einmalig abfragen) ────────
   function bearer() { return sessionStorage.getItem("relayBearer") || ""; }
 
+  // ── P1#3: Browser-Notifications (Codex-Matrix 1.3) ──
+  // Pref in localStorage[relay.notify]="on"|"off"; permission nur on-demand
+  // beim Einschalten; Notification nur für fremd-Raum-Nachrichten UND
+  // (tab hidden ODER Raum nicht aktiv) — nie Doppel-Ping im offenen Raum.
+  function notifyPref() { try { return localStorage.getItem("relay.notify") === "on"; } catch { return false; } }
+  function setNotifyPref(on) {
+    try {
+      if (on) localStorage.setItem("relay.notify", "on");
+      else localStorage.setItem("relay.notify", "off");
+    } catch {}
+    const btn = $("#notifyToggle");
+    if (btn) btn.textContent = `🔔 Benachrichtigungen: ${on ? "an" : "aus"}`;
+  }
+  function updateNotifyLabel() {
+    const btn = $("#notifyToggle");
+    if (btn) btn.textContent = `🔔 Benachrichtigungen: ${notifyPref() ? "an" : "aus"}`;
+  }
+  async function toggleNotify() {
+    if (notifyPref()) { setNotifyPref(false); return; }
+    if (!("Notification" in window)) { toast("Kein Notification-Support im Browser"); return; }
+    let perm = Notification.permission;
+    if (perm === "denied") { toast("Benachrichtigungen im Browser blockiert"); return; }
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      setNotifyPref(true);
+      toast("🔔 Benachrichtigungen aktiv");
+    } else toast("Berechtigung verweigert");
+  }
+  function sendNotify(roomId, m) {
+    if (!notifyPref() || !("Notification" in window) || Notification.permission !== "granted") return;
+    if (document.visibilityState === "visible" && roomId === state.currentRoomId) return;
+    const room = state.rooms.find((r) => r.id === roomId);
+    const who = m.senderKind === "human" ? (m.senderName || "du") : (m.senderName || "Agent");
+    const body = (m.content || "").replace(/\s+/g, " ").slice(0, 120);
+    const n = new Notification(`${room?.emoji || "#"} ${room?.name || "Raum"} — ${who}`, {
+      body,
+      tag: `relay-${roomId}`, // koalesce je Raum (OpenClaw toast-cooldown-Muster)
+      silent: false,
+    });
+    n.addEventListener("click", () => {
+      try { window.focus(); selectRoom(roomId); n.close(); } catch {}
+    });
+  }
+
   // Row-Subtitle (Matrix-22, buzz-Pattern): letzter Message-Text als Digest
   // unter dem Raumnamen — "what is happening" im Sidebar-Scan. Live aus dem
   // Message-Puffer (aktueller Raum) oder rooms[].lastMessage (Backend-Subselect).
@@ -121,8 +165,12 @@
           // Read-Marker (Matrix-3, buzz useLiveChannelUpdates.ts:34-40):
           // anderer Raum → Unread-Zähler + Dot, ohne Öffnen
           bumpUnread(e.message.roomId);
+          // P1#3: Browser-Notification für fremde Raum-Nachrichten
+          if (e.message.senderKind !== "human") sendNotify(e.message.roomId, e.message);
           break;
         }
+        // P1#3: tab verdeckt + Agent-Antwort im offenen Raum → ebenfalls notify
+        if (e.message.senderKind !== "human" && document.visibilityState !== "visible") sendNotify(e.message.roomId, e.message);
         state.messages[e.message.id] = e.message;
         // Pill-Zählung hier (nicht in renderMessages — kein Doppelzähler):
         // nur wenn non-follow UND fremde Nachricht (Eigen-Send resynced immer)
@@ -175,6 +223,13 @@
           const ms = Date.now() - tt.t0;
           turnStats[e.message.id] = { secs: Math.max(1, Math.round(ms / 1000)), tokens: tt.tokens };
           delete turnTimers[e.message.id];
+        }
+        // P1#3: Notify-Zweig MUSS vor der Membership-Prüfung stehen —
+        // fremd-Raum-Nachrichten sind nie in state.messages (nur aktiver
+        // Raum wird geladen); der alte in-block Hook feuerte deshalb nie.
+        if (e.message?.senderKind === "agent" && e.message.roomId &&
+            (e.message.roomId !== state.currentRoomId || document.visibilityState !== "visible")) {
+          sendNotify(e.message.roomId, e.message);
         }
         if (e.message && state.messages[e.message.id]) {
           state.messages[e.message.id] = e.message;
@@ -1526,6 +1581,7 @@
       const act = b.dataset.userAct;
       if (act === "newRoom") openNewRoom();
       else if (act === "newAgent") agentModal();
+      else if (act === "notify") toggleNotify();
       else if (act) switchView(act);
     }));
     document.addEventListener("mousedown", (ev) => { if (!menu.hidden && !card.contains(ev.target) && !menu.contains(ev.target)) close(); });
@@ -1587,6 +1643,7 @@
       $("#brandName").textContent = h.name || "Agent Relay";
     } catch { state.adapters = ["echo"]; }
     restoreLastRead();
+    updateNotifyLabel();
     await Promise.all([loadRooms(), loadAgents()]);
     if (state.rooms.length) selectRoom(state.rooms[0].id);
     connectWS();

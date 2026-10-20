@@ -868,3 +868,6 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 /* Composer-Attach: Button grau statt accent (sekundäre Aktion, Control-UI) */
 #composerAttach { background: var(--s3) !important; color: var(--ink-2) !important; }
 #composerAttach:hover { background: var(--s4) !important; color: var(--ink) !important; }
+
+/* ── P1#3 Notifications ────────────────────────────── */
+.menu-sep { height: 1px; background: var(--line); margin: 4px 10px; }
