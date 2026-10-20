@@ -53,6 +53,7 @@
           <button data-user-act="settings">⚙️ Einstellungen</button>
           <button data-user-act="agents">🤖 Agents verwalten</button>
           <button data-user-act="projects">🗂 Projekte</button>
+          <button data-user-act="audit">🧾 Audit-Register</button>
           <div class="menu-sep"></div>
           <button data-user-act="notify" id="notifyToggle">🔔 Benachrichtigungen: aus</button>
         </div>
@@ -135,7 +136,18 @@
         <div class="dash-grid" id="dashGrid"></div>
       </section>
 
-      <section class="view" id="view-settings" hidden>
+      <!-- Audit-Register (P3#4) -->
+  <section class="view" id="view-audit" hidden>
+    <header class="view-head">
+      <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
+      <h2>Audit-Register</h2>
+      <button id="auditVerifyBtn" class="btn" type="button">Kette prüfen</button>
+    </header>
+    <p class="hint" style="padding:0 16px;">Append-only Hash-Kette (sha256 über seq|Aktion|Aktor|Subjekt|Detail|Vorgänger-Hash). Manipulation bricht die Kette — kein stiller Beweis-Verlust.</p>
+    <div id="auditVerifyOut" class="audit-verify" role="status"></div>
+    <div id="auditList" class="audit-list"></div>
+  </section>
+  <section class="view" id="view-settings" hidden>
         <header class="view-head">
           <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
           <h2>Einstellungen</h2>

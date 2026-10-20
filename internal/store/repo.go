@@ -387,6 +387,16 @@ func (d *DB) GetRoom(id string) (*Room, error) {
 	return r, nil
 }
 
+// projectIDArg flattens the optional room→project link for SQL args
+// (nil-Pointer auf SQL NULL; P3#4-E2E-Befund: InsertRoom erklärte 10 Platz-
+// halter, bindet aber nur 9 Args — „missing argument with index 10“).
+func projectIDArg(r *Room) any {
+	if r.ProjectID == nil {
+		return nil
+	}
+	return *r.ProjectID
+}
+
 func (d *DB) InsertRoom(r *Room) error {
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -401,7 +411,7 @@ func (d *DB) InsertRoom(r *Room) error {
 		hm = 0
 	}
 	if _, err := tx.Exec(`INSERT INTO rooms (id,name,kind,human_member,position,topic,pinned_message_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Name, kind, hm, r.Position, r.Topic, nil, r.CreatedAt, r.UpdatedAt); err != nil {
+		r.ID, r.Name, kind, hm, r.Position, r.Topic, nil, projectIDArg(r), r.CreatedAt, r.UpdatedAt); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -817,7 +827,7 @@ func (d *DB) DeleteRoutine(id string) error {
 	return err
 }
 
-// RoomRoles (P2#8): map[agentID]→role je Raum; '' = default. UI + künftige
+// RoomRoles (P2#8): map[agentID]→role je Raum; ” = default. UI + künftige
 // Agent-Gewichtung; 1 Query.
 func (d *DB) RoomRoles(roomID string) (map[string]string, error) {
 	rows, err := d.db.Query(`SELECT agent_id, role FROM room_members WHERE room_id=?`, roomID)
@@ -928,13 +938,13 @@ func (d *DB) UpdateSkill(skill *Skill) (string, error) {
 		return "", fmt.Errorf("skill %s nicht gefunden", skill.ID)
 	}
 	neu := &Skill{
-		ID:          NewID("skill"),
-		Name:        skill.Name,
+		ID:           NewID("skill"),
+		Name:         skill.Name,
 		Instructions: skill.Instructions,
-		Version:     old.Version + 1,
-		ParentID:    &old.ID,
-		CreatedAt:   now(),
-		UpdatedAt:   now(),
+		Version:      old.Version + 1,
+		ParentID:     &old.ID,
+		CreatedAt:    now(),
+		UpdatedAt:    now(),
 	}
 	if err := d.InsertSkill(neu); err != nil {
 		return "", err
@@ -1106,7 +1116,7 @@ func (d *DB) ListApprovals(status string) ([]*Approval, error) {
 	if status != "" {
 		rows, err = d.db.Query(q+` WHERE status=? ORDER BY created_at DESC LIMIT 200`, status)
 	} else {
-		rows, err = d.db.Query(q+` ORDER BY created_at DESC LIMIT 200`)
+		rows, err = d.db.Query(q + ` ORDER BY created_at DESC LIMIT 200`)
 	}
 	if err != nil {
 		return nil, err
@@ -1232,7 +1242,7 @@ func (d *DB) ListTasks(projectID string) ([]*Task, error) {
 	if projectID != "" {
 		rows, err = d.db.Query(`SELECT `+taskCols+` FROM tasks WHERE project_id=? ORDER BY position,created_at`, projectID)
 	} else {
-		rows, err = d.db.Query(`SELECT `+taskCols+` FROM tasks ORDER BY position,created_at`)
+		rows, err = d.db.Query(`SELECT ` + taskCols + ` FROM tasks ORDER BY position,created_at`)
 	}
 	if err != nil {
 		return nil, err

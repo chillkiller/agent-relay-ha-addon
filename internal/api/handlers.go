@@ -29,12 +29,12 @@ type sub struct {
 }
 
 type Server struct {
-	st     *store.DB
-	rt     *runtime.Runtime
+	st      *store.DB
+	rt      *runtime.Runtime
 	dataDir string // attachment storage root (P1#2); empty = uploads disabled
-	mu     sync.RWMutex
-	subs   map[*sub]bool
-	bearer string // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
+	mu      sync.RWMutex
+	subs    map[*sub]bool
+	bearer  string // optional API gate (RELAY_BEARER_TOKEN); empty = open LAN mode
 }
 
 func New(st *store.DB, rt *runtime.Runtime, dataDir string) *Server {
@@ -176,6 +176,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/skills/{id}/restore", s.restoreSkill)
 	mux.HandleFunc("PUT /api/skills/{id}/agents", s.setSkillAgents)
 	mux.HandleFunc("GET /api/approvals", s.listApprovals)
+	mux.HandleFunc("GET /api/audit", s.listAudit)
+	mux.HandleFunc("GET /api/audit/verify", s.verifyAudit)
 	mux.HandleFunc("POST /api/approvals/{id}/grant", s.decideApprovalGranted)
 	mux.HandleFunc("POST /api/approvals/{id}/deny", s.decideApprovalDenied)
 	mux.HandleFunc("GET /api/rooms/{id}/search", s.searchMessages)
@@ -364,6 +366,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if b.Enabled != nil {
 		enabled = *b.Enabled
 	}
+	approvalGate := false // v1-Default: Gate opt-in (createAgent-Gap, P3#4-E2E-Befund)
+	if b.ApprovalGate != nil {
+		approvalGate = *b.ApprovalGate
+	}
+	auditADet, _ := json.Marshal(map[string]any{"adapter": fallback(b.Adapter, "echo"), "approvalGate": approvalGate})
 	a := &store.Agent{
 		ID:           newIDs("agent"),
 		Name:         b.Name,
@@ -375,6 +382,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		BaseURL:      b.BaseURL,
 		APIKey:       b.APIKey,
 		Enabled:      enabled,
+		ApprovalGate: approvalGate,
 		CreatedAt:    nowISO(),
 		UpdatedAt:    nowISO(),
 	}
@@ -382,6 +390,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, err.Error())
 		return
 	}
+	// Audit (P3#4): Agent-Erstellung = Register-Fall (Konfigurations-Beweis).
+	_ = s.st.AppendAudit(&store.AuditEvent{
+		Action: "agent.created", Actor: a.Name, ActorKind: "system",
+		Subject: a.ID, Detail: string(auditADet),
+	})
 	writeJSON(w, 201, a)
 }
 

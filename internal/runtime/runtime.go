@@ -2,6 +2,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -26,7 +27,7 @@ type Runtime struct {
 	bus      Bus
 	mu       sync.RWMutex
 	adapters map[string]adapter.Adapter
-	stop    chan struct{}
+	stop     chan struct{}
 	// per-agent turn serialization (review-2 copilot M-B)
 	busy    map[string]bool
 	pending map[string]*store.Message // agentID -> latest queued user msg
@@ -450,6 +451,13 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	}
 	cfg.SessionKey = fmt.Sprintf("agent:%s:relay:%s", target, userMsg.RoomID)
 
+	// Audit (P3#4): Turn-Start als Register-Fall — Receipt zeigt WANN/WER/
+	// warum-Weg (Adapter + sessionKey), nicht den Chat-Inhalt.
+	r.audit("agent.turn.started", a.Name, "agent", userMsg.RoomID, map[string]any{
+		"agentId": a.ID, "msgId": userMsg.ID,
+		"adapter": a.Adapter, "sessionKey": cfg.SessionKey,
+	})
+
 	// stream placeholder row first, so ordering in UI is stable
 	// P1#4: Agent-Antwort erbt parent_id vom auslösenden Turn — der
 	// Agent-Turn bleibt im selben Thread wie die Frage.
@@ -476,6 +484,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 
 	if err := adapt.Validate(cfg); err != nil {
 		finish := fmt.Sprintf("⚠️ %v", err)
+		r.audit("agent.turn.error", a.Name, "agent", userMsg.RoomID, map[string]any{"msgId": msgID, "phase": "validate"})
 		_ = r.st.UpdateMessage(msgID, finish, "error")
 		r.publish("agent.finished", map[string]any{
 			"message": updated(r.st, msgID),
@@ -514,6 +523,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	chunks, err := adapt.Stream(cfg, history)
 	if err != nil {
 		finish := fmt.Sprintf("⚠️ %v", err)
+		r.audit("agent.turn.error", a.Name, "agent", userMsg.RoomID, map[string]any{"msgId": msgID, "phase": "stream"})
 		_ = r.st.UpdateMessage(msgID, finish, "error")
 		r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 		return nil
@@ -522,6 +532,7 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 	var acc strings.Builder
 	for c := range chunks {
 		if c.Err != nil {
+			r.audit("agent.turn.error", a.Name, "agent", userMsg.RoomID, map[string]any{"msgId": msgID, "phase": "chunk"})
 			_ = r.st.UpdateMessage(msgID, acc.String()+fmt.Sprintf("\n⚠️ %v", c.Err), "error")
 			r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 			return nil
@@ -536,6 +547,11 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 		final, status = "⚠️ Leere Antwort vom Adapter", "error"
 	}
 	_ = r.st.UpdateMessage(msgID, final, status)
+	// Audit (P3#4): Turn-Terminus — Status + Antwortgröße (Bytes, nicht der
+	// Text: Inhalt bleibt im messages-Log; das Register beweist Ereignisse).
+	r.audit("agent.turn.finished", a.Name, "agent", userMsg.RoomID, map[string]any{
+		"msgId": msgID, "status": status, "bytes": len(final),
+	})
 	r.publish("agent.finished", map[string]any{"message": updated(r.st, msgID)})
 	return nil
 }
@@ -577,7 +593,36 @@ func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
-		if v != "" { return v }
+		if v != "" {
+			return v
+		}
 	}
 	return ""
+}
+
+// audit (P3#4): append one Relay event to the hash-chain register.
+// Failure is logged, never fatal — bookkeeping must not break turns
+// (Register ist Beweis-Schicht, kein Steuerungs-Abhängigkeit).
+func (r *Runtime) audit(action, actor, actorKind, subject string, detail map[string]any) {
+	e := &store.AuditEvent{
+		Action: action, Actor: actor, ActorKind: actorKind,
+		Subject: subject, Detail: auditJSON(detail),
+	}
+	if err := r.st.AppendAudit(e); err != nil {
+		log.Printf("[audit] append fehlgeschlagen (%s): %v", action, err)
+	}
+}
+
+// auditJSON encodes detail deterministically (encoding/json sorts map keys)
+// so the chain verification reproduces the exact stored bytes; nil → "{}"
+// (codex P3-5 — nie "null" in der Kette).
+func auditJSON(m map[string]any) string {
+	if m == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }

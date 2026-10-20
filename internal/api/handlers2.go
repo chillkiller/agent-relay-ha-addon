@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"strconv"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,15 +116,15 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 // ── handlers: rooms ─────────────────────────────────────────────────
 
 type roomBody struct {
-	Name      string   `json:"name"`
-	Kind      string   `json:"kind"` // chat | project
-	HumanMember *bool  `json:"humanMember"` // operator in/out
-	ProjectID *string  `json:"projectId"`
-	AgentIDs  []string `json:"agentIds"`
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`        // chat | project
+	HumanMember *bool    `json:"humanMember"` // operator in/out
+	ProjectID   *string  `json:"projectId"`
+	AgentIDs    []string `json:"agentIds"`
 	// member endpoints:
 	AgentID string `json:"agentId"`
 	// P1#8 / P2#10-Rest:
-	Topic   string `json:"topic,omitempty"`            // Raum-Thema (buzz channel topic)
+	Topic           string `json:"topic,omitempty"`           // Raum-Thema (buzz channel topic)
 	PinnedMessageID string `json:"pinnedMessageId,omitempty"` // pin/unpin (leer = unpin)
 	// P2#8: role je member (member endpoints)
 	Role string `json:"role,omitempty"`
@@ -168,7 +168,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		proj := &store.Project{ID: newIDs("proj"), Name: b.Name, CreatedAt: nowISO(), UpdatedAt: nowISO()}
 		if err := s.st.InsertProject(proj); err != nil {
 			log.Printf("[api] store error: %v", err)
-		errJSON(w, 500, "interner Fehler")
+			errJSON(w, 500, "interner Fehler")
 			return
 		}
 		b.ProjectID = &proj.ID
@@ -265,7 +265,7 @@ func (s *Server) patchRoom(w http.ResponseWriter, r *http.Request) {
 			proj := &store.Project{ID: newIDs("proj"), Name: name, CreatedAt: nowISO(), UpdatedAt: nowISO()}
 			if err := s.st.InsertProject(proj); err != nil {
 				log.Printf("[api] store error: %v", err)
-		errJSON(w, 500, "interner Fehler")
+				errJSON(w, 500, "interner Fehler")
 				return
 			}
 			room.ProjectID = &proj.ID
@@ -471,7 +471,6 @@ func env(key, def string) string {
 	return def
 }
 
-
 func (s *Server) reorderRooms(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Order []string `json:"order"`
@@ -661,6 +660,7 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusNormalClosure, "bye")
 	}
 }
+
 // ── quick-wins: reactions + search ──────────────────────────────────
 
 func (s *Server) addReaction(w http.ResponseWriter, r *http.Request) {
@@ -727,6 +727,18 @@ func decideApproval(s *Server, decision string) http.HandlerFunc {
 			return
 		}
 		ap, _ := s.st.GetApproval(r.PathValue("id"))
+		if ap != nil {
+			// Audit (P3#4): Approval-Entscheidung = Register-Fall (buzz "receipts":
+			// wer hat wann freigegeben/abgelehnt — Beweiskette, nicht Prosa).
+			det, _ := json.Marshal(map[string]any{
+				"approvalId": ap.ID, "agentId": ap.AgentID, "userMsgId": ap.UserMsgID,
+				"reason": ap.Reason, // codex P3-1: Entscheidung mit Begründung belegen
+			})
+			_ = s.st.AppendAudit(&store.AuditEvent{
+				Action: "approval." + decision, Actor: humanName(), ActorKind: "human",
+				Subject: ap.AgentID, Detail: string(det),
+			})
+		}
 		s.broadcast(map[string]any{"type": "approval.decided", "approval": ap, "ts": time.Now().UnixMilli()})
 		if decision == "granted" && ap != nil {
 			if err := s.rt.ResumeApproval(ap); err != nil {
@@ -740,6 +752,33 @@ func decideApproval(s *Server, decision string) http.HandlerFunc {
 
 func (s *Server) decideApprovalGranted(w http.ResponseWriter, r *http.Request) {
 	decideApproval(s, "granted")(w, r)
+}
+
+// ── audit register (P3#4 — paperclip audit / buzz "receipts") ───────
+
+// listAudit serves the newest register rows (newest first, default 50).
+func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	evs, err := s.st.ListAudit(limit)
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if evs == nil {
+		evs = []*store.AuditEvent{}
+	}
+	writeJSON(w, 200, evs)
+}
+
+// verifyAudit recomputes the whole hash chain: ok=true = jedes Blatt passt
+// inhaltlich UND an den Tipp-Hash des Vorgängers. Beweis statt Behauptung.
+func (s *Server) verifyAudit(w http.ResponseWriter, _ *http.Request) {
+	ok, at, n, err := s.st.VerifyAuditChain()
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": ok, "brokenAt": at, "entries": n})
 }
 
 func (s *Server) decideApprovalDenied(w http.ResponseWriter, r *http.Request) {
@@ -861,13 +900,13 @@ func (s *Server) dashboardAggregates(w http.ResponseWriter, _ *http.Request) {
 	// tasks je Projekt (open/doing/done — projekt-kopfzeile)
 	projects, _ := s.st.ListProjects()
 	type projAgg struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Color    string `json:"color"`
-		Todo     int    `json:"todo"`
-		Doing    int    `json:"doing"`
-		Done     int    `json:"done"`
-		OpenTotal int   `json:"openTotal"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Color     string `json:"color"`
+		Todo      int    `json:"todo"`
+		Doing     int    `json:"doing"`
+		Done      int    `json:"done"`
+		OpenTotal int    `json:"openTotal"`
 	}
 	pout := []projAgg{}
 	tasks, _ := s.st.ListTasks("")
@@ -1160,8 +1199,8 @@ func (s *Server) createSkill(w http.ResponseWriter, r *http.Request) {
 func (s *Server) patchSkill(w http.ResponseWriter, r *http.Request) {
 	// update = neue Version-Row (Paperclip Version-History); alt bleibt restorebar
 	var b struct {
-		Name         string   `json:"name"`
-		Instructions string   `json:"instructions"`
+		Name         string `json:"name"`
+		Instructions string `json:"instructions"`
 	}
 	if err := decode(r, &b); err != nil {
 		errJSON(w, 400, "ungültiges JSON")
@@ -1265,7 +1304,6 @@ func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, msg)
 }
 
-
 // ── attachments (P1#2, Codex-Matrix 1.2 buzz-media/paperclip
 // file-resources): multipart-Upload → FS unter <dataDir>/attachments,
 // Meta in SQLite; GET serve mit Filename-Disposition; Batch liefert die
@@ -1358,7 +1396,7 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveAttachment: GET /api/attachments/{id} — Datei mit Content-Type/—
-//-Disposition (filename), keine Pfad-Information im Response.
+// -Disposition (filename), keine Pfad-Information im Response.
 func (s *Server) serveAttachment(w http.ResponseWriter, r *http.Request) {
 	att, err := s.st.GetAttachment(r.PathValue("id"))
 	if err != nil {

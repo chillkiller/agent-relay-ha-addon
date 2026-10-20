@@ -6,6 +6,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +30,11 @@ type Agent struct {
 	BaseURL      string `json:"baseUrl"`
 	// APIKey is deliberately NOT serialised (review-2 copilot H-2): the UI
 	// only sets it (write-only), never needs it back.
-	APIKey    string `json:"-"`
-	Enabled   bool   `json:"enabled"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
-	ApprovalGate bool `json:"approvalGate"` // P2#2: Turn hält vor Stream bis grant
+	APIKey       string `json:"-"`
+	Enabled      bool   `json:"enabled"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+	ApprovalGate bool   `json:"approvalGate"` // P2#2: Turn hält vor Stream bis grant
 }
 
 type Project struct {
@@ -46,35 +47,35 @@ type Project struct {
 }
 
 type Room struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Kind           string   `json:"kind"` // "chat" | "project" (project rooms carry the task board)
-	HumanMember    bool     `json:"humanMember"` // operator participation; false = room hidden from sidebar
-	Position       int      `json:"position"` // manual sort order (drag&drop, review-7 B3)
-	Topic          string   `json:"topic,omitempty"` // P1#8: Raum-Thema (buzz channel topic)
-	PinnedMessageID *string `json:"pinnedMessageId,omitempty"` // P1#10-Rest: ge-pinnte Nachricht je Raum
-	ProjectID      *string  `json:"projectId"` // legacy link; project-kind rooms are the room themselves
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	MemberAgentIDs []string `json:"memberAgentIds"`
-	Roles          map[string]string `json:"roles,omitempty"` // P2#8: agentId→role (Codex-Befund 3)
-	MessageCount   int      `json:"messageCount"`
-	LastMessage    string   `json:"lastMessage,omitempty"` // Row-Subtitle (Matrix-22, OpenClaw chat.md:132-134): Digest der letzten Nachricht
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Kind            string            `json:"kind"`                      // "chat" | "project" (project rooms carry the task board)
+	HumanMember     bool              `json:"humanMember"`               // operator participation; false = room hidden from sidebar
+	Position        int               `json:"position"`                  // manual sort order (drag&drop, review-7 B3)
+	Topic           string            `json:"topic,omitempty"`           // P1#8: Raum-Thema (buzz channel topic)
+	PinnedMessageID *string           `json:"pinnedMessageId,omitempty"` // P1#10-Rest: ge-pinnte Nachricht je Raum
+	ProjectID       *string           `json:"projectId"`                 // legacy link; project-kind rooms are the room themselves
+	CreatedAt       string            `json:"createdAt"`
+	UpdatedAt       string            `json:"updatedAt"`
+	MemberAgentIDs  []string          `json:"memberAgentIds"`
+	Roles           map[string]string `json:"roles,omitempty"` // P2#8: agentId→role (Codex-Befund 3)
+	MessageCount    int               `json:"messageCount"`
+	LastMessage     string            `json:"lastMessage,omitempty"` // Row-Subtitle (Matrix-22, OpenClaw chat.md:132-134): Digest der letzten Nachricht
 }
 
 type Message struct {
-	ID         string `json:"id"`
-	RoomID     string `json:"roomId"`
-	AgentID    string `json:"agentId"` // empty for human/system
-	SenderName string `json:"senderName"`
-	SenderKind string `json:"senderKind"` // human|agent|system
-	Content    string `json:"content"`
-	Status     string `json:"status"` // streaming|complete|error
-	CreatedAt  string `json:"createdAt"`
-	UpdatedAt  string `json:"updatedAt"`
+	ID          string        `json:"id"`
+	RoomID      string        `json:"roomId"`
+	AgentID     string        `json:"agentId"` // empty for human/system
+	SenderName  string        `json:"senderName"`
+	SenderKind  string        `json:"senderKind"` // human|agent|system
+	Content     string        `json:"content"`
+	Status      string        `json:"status"` // streaming|complete|error
+	CreatedAt   string        `json:"createdAt"`
+	UpdatedAt   string        `json:"updatedAt"`
 	Attachments []*Attachment `json:"attachments,omitempty"` // P1#2: enriched on read
-	ParentID   *string `json:"parentId,omitempty"` // P1#4: thread root (reply-to)
-	ReplyCount int     `json:"replyCount,omitempty"` // P1#4: enriched on read
+	ParentID    *string       `json:"parentId,omitempty"`    // P1#4: thread root (reply-to)
+	ReplyCount  int           `json:"replyCount,omitempty"`  // P1#4: enriched on read
 }
 
 type Attachment struct {
@@ -88,15 +89,15 @@ type Attachment struct {
 }
 
 type Skill struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Instructions string `json:"instructions"`
-	Version     int     `json:"version"`
-	ParentID    *string `json:"parentId,omitempty"`
-	DeletedAt   string  `json:"deletedAt,omitempty"`
-	CreatedAt   string  `json:"createdAt"`
-	UpdatedAt   string  `json:"updatedAt"`
-	AgentIDs    []string `json:"agentIds,omitempty"` // enriched: Bindungen
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Instructions string   `json:"instructions"`
+	Version      int      `json:"version"`
+	ParentID     *string  `json:"parentId,omitempty"`
+	DeletedAt    string   `json:"deletedAt,omitempty"`
+	CreatedAt    string   `json:"createdAt"`
+	UpdatedAt    string   `json:"updatedAt"`
+	AgentIDs     []string `json:"agentIds,omitempty"` // enriched: Bindungen
 }
 
 type RoomRead struct {
@@ -120,22 +121,22 @@ type Routine struct {
 }
 
 type TaskComment struct {
-	ID        string `json:"id"`
-	TaskID    string `json:"taskId"`
+	ID         string `json:"id"`
+	TaskID     string `json:"taskId"`
 	AuthorKind string `json:"authorKind"` // human|agent|system
 	AuthorName string `json:"authorName"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"createdAt"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"createdAt"`
 }
 
 type Approval struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agentId"`
-	UserMsgID string `json:"userMsgId"`
-	Reason    string `json:"reason"`
-	Status    string `json:"status"` // pending|granted|denied
-	CreatedAt string `json:"createdAt"`
-	DecidedAt string `json:"decidedAt,omitempty"`
+	ID         string `json:"id"`
+	AgentID    string `json:"agentId"`
+	UserMsgID  string `json:"userMsgId"`
+	Reason     string `json:"reason"`
+	Status     string `json:"status"` // pending|granted|denied
+	CreatedAt  string `json:"createdAt"`
+	DecidedAt  string `json:"decidedAt,omitempty"`
 	ConsumedAt string `json:"consumedAt,omitempty"` // P2#2: Grant-Token verbraucht (Audit)
 }
 
@@ -181,7 +182,23 @@ func Open(dataDir string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &DB{db: db}, nil
+	d := &DB{db: db}
+	// Audit-Register (P3#4): Genesis-Eintrag in eine leere Kette schreiben,
+	// damit verify() bei gelöschtem Register NICHT ok meldet (leere Kette
+	// = ok wäre Lösch-Beweis-schädlich).
+	var seq int64
+	_ = d.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM audit_events`).Scan(&seq)
+	if seq == 0 {
+		if err := d.AppendAudit(&AuditEvent{
+			Action: "relay.genesis", Actor: "relay", ActorKind: "system",
+			Subject: "audit_events", Detail: "{\"note\":\"Register-Genesis bei leerer Kette\"}",
+		}); err != nil {
+			// codex P2-1: Seed-Fail nie still schlucken — verify() meldet für
+			// leere Kette ok=false (brokenAt="leer"); Ursache steht hier im Log.
+			log.Printf("[store] audit-genesis fehlgeschlagen: %v", err)
+		}
+	}
+	return d, nil
 }
 
 func tryWAL(db *sql.DB) error {
@@ -455,6 +472,21 @@ CREATE TABLE IF NOT EXISTS room_reads (
   reader TEXT NOT NULL DEFAULT 'human',
   last_read_at TEXT NOT NULL,
   PRIMARY KEY (room_id, reader)
+);
+-- Audit-Log (P3#4, paperclip audit / buzz "answers with receipts"):
+-- append-only Ereignis-Kette; hash = sha256(seq|action|actor|actor_kind|
+-- subject|detail|prev_hash) — jeder Eintrag verkettet mit dem Tipp-
+-- Hash des Vorgängers. Eintrag löschbar im FS ≠ unsichtbar: Kette bricht.
+CREATE TABLE IF NOT EXISTS audit_events (
+  seq INTEGER PRIMARY KEY,
+  action TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  actor_kind TEXT NOT NULL DEFAULT '' CHECK (actor_kind IN ('','human','agent','system')), 
+  subject TEXT NOT NULL DEFAULT '-',
+  detail TEXT NOT NULL DEFAULT '{}',
+  prev_hash TEXT NOT NULL DEFAULT '',
+  hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 `)
 	return err

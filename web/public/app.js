@@ -21,6 +21,7 @@
     ws: null,
     // Sprint-1 (docs/RE/2026-10-20-transfer-matrix-frontend.md: Zeilen 3/11/22):
     following: true,  // Follow-Scroll-Vertrag: nur near-bottom auto-follow
+    audit: [],        // P3#4 Audit-Register (neueste zuerst)
     newBelow: 0,      // Pill-Zähler "N neu ↓"
     lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
     threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
@@ -340,6 +341,7 @@
         pendingApprovals = pendingApprovals.filter((x) => x.id !== e.approval?.id);
         renderApprovalBanner();
         updateDashBadge(); // P2#7-Badge live
+        loadAudit(); // P3#4: Approval-Entscheidung = Register-Fall
         break;
       }
       case "message.updated": {
@@ -402,7 +404,7 @@
   // ═════════════════════════════════════════════════════════════════
   function switchView(view) {
     state.view = view;
-    for (const v of ["chat", "agents", "projects", "settings", "dashboard"]) {
+    for (const v of ["chat", "agents", "projects", "settings", "dashboard", "audit"]) {
       $(`#view-${v}`).hidden = v !== view;
     }
     document.querySelectorAll(".nav-btn").forEach((b) =>
@@ -411,6 +413,7 @@
     if (view === "dashboard") renderDashboard();
     if (view === "projects") loadProjectsView();
     if (view === "settings") renderSettingsForm();
+    if (view === "audit") loadAudit();
     document.body.classList.remove("sidebar-open");
   }
 
@@ -1849,6 +1852,57 @@
   // Desktop-Verhalten identisch (konsistente Navigation, kein Sackgassen-Layout).
   document.querySelectorAll(".view-back").forEach((b) =>
     b.addEventListener("click", () => switchView("chat")));
+
+  // ── P3#4 Audit-Register (paperclip audit / buzz "receipts") ──
+  // Register = Beweis-Schicht: agent.turn.* + relay.genesis als hash-chained
+  // Kette; verify() rechnet die Kette nach (Beweis statt Behauptung).
+  const AUDIT_ACTIONS = {
+    "relay.genesis":       { ico: "🧾", label: "Register-Genesis" },
+    "agent.turn.started":  { ico: "▶️", label: "Turn gestartet" },
+    "agent.turn.finished": { ico: "✔️", label: "Turn beendet" },
+    "agent.turn.error":    { ico: "⚠️", label: "Turn-Fehler" },
+    "approval.granted":    { ico: "✅", label: "Approval erteilt" },
+    "approval.denied":     { ico: "⛔", label: "Approval abgelehnt" },
+  };
+  function auditMeta(ev) { return AUDIT_ACTIONS[ev.action] || { ico: "•", label: ev.action }; }
+  function auditDetail(d, key) { try { return JSON.parse(d || "{}")[key] ?? ""; } catch { return ""; } }
+  async function loadAudit() {
+    const data = await api("GET", "/api/audit?limit=100").catch(() => null);
+    if (Array.isArray(data)) state.audit = data;
+    if (state.view === "audit") renderAudit();
+  }
+  function renderAudit() {
+    const list = $("#auditList");
+    if (!list) return;
+    if (!state.audit.length) {
+      list.innerHTML = `<div class="audit-empty">🧾 Register leer — Agent-Turns erscheinen hier mit Beweis-Kette.</div>`;
+      return;
+    }
+    list.innerHTML = state.audit.map((ev) => {
+      const m = auditMeta(ev);
+      const t = fmtTime(ev.createdAt);
+      const bytes = auditDetail(ev.detail, "bytes");
+      const detail = ev.action === "agent.turn.finished" && bytes !== ""
+        ? `${esc(String(bytes))} B Antwort` : esc(auditDetail(ev.detail, "phase") || auditDetail(ev.detail, "adapter"));
+      return `<div class="audit-row${ev.action.endsWith(".error") ? " err" : ""}">
+        <span class="audit-ico">${m.ico}</span>
+        <span class="audit-body"><b>${esc(m.label)}</b>
+          <span class="a-sub">${esc(ev.actor)} · ${esc(ev.subject)}${detail ? " · " + detail : ""}</span></span>
+        <span class="audit-right"><span class="a-seq" title="seq">№${ev.seq}</span><span class="a-time">${t}</span></span>
+      </div>`;
+    }).join("");
+  }
+  async function verifyAudit() {
+    const out = $("#auditVerifyOut");
+    if (!out) return;
+    out.textContent = "…";
+    const v = await api("GET", "/api/audit/verify").catch(() => null);
+    if (!v) { out.textContent = "⚠️ verify fehlgeschlagen"; return; }
+    out.innerHTML = v.ok
+      ? `<span class="a-ok">✔ Kette intakt</span> — ${v.entries} Einträge geprüft`
+      : `<span class="a-bad">✘ KETTE BRUCH bei ${esc(v.brokenAt)}</span> (${v.entries} Einträge vor Bruch verifiziert)`;
+  }
+  $("#auditVerifyBtn")?.addEventListener("click", verifyAudit);
 
 
   // ── Sprint-5a: Shortcuts (Matrix-19, buzz keyboard-shortcuts.ts) ──
