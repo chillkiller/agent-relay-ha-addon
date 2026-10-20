@@ -24,6 +24,7 @@
     newBelow: 0,      // Pill-Zähler "N neu ↓"
     lastRead: {},     // room.<roomId>.lastRead (buzz-Pattern, localStorage-backed)
     threadMode: null, // P1#4: { rootId } während eine Thread-Antwort komponiert wird
+    chatTaskId: null, // P2#1: offenes Chatter-Panel (taskId)
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -34,6 +35,61 @@
   // ── API (Bearer aus sessionStorage, 401 → einmalig abfragen) ────────
   function bearer() { return sessionStorage.getItem("relayBearer") || ""; }
 
+  // ── P2#2: Approvals (paperclip approvals.ts, Matrix-16-Card-Muster) ──
+  // Banner über dem Composer: je pending Approval eine Karte (Agent-Name,
+  // Reason, Grant/Deny-Buttons); state im WS-Event-Feed (kein Poll).
+  let pendingApprovals = [];
+  async function renderApprovalBanner() {
+    const wrap = $("#approvalBanner");
+    if (!wrap) return;
+    // Agent-Namen auflösen (cards brauchen Namen/Kontext)
+    const agents = state.agents;
+    const cards = pendingApprovals.map((ap) => {
+      const ag = agents.find((x) => x.id === ap.agentId);
+      const who = ag ? `${ag.emoji} ${esc(ag.name)}` : esc(ap.agentId);
+      return `
+        <div class="approval-card" data-apid="${esc(ap.id)}">
+          <div class="ap-row">
+            <span class="badge-pill ap-pill">● Freigabe</span>
+            <strong>${who}</strong>
+            <span class="ap-reason">${esc(ap.reason || "")}</span>
+          </div>
+          <div class="ap-actions">
+            <button class="btn primary" data-apact="granted" data-apid="${esc(ap.id)}">Genehmigen</button>
+            <button class="btn danger" data-apact="denied" data-apid="${esc(ap.id)}">Ablehnen</button>
+          </div>
+        </div>`;
+    }).join("");
+    wrap.innerHTML = cards;
+    wrap.hidden = pendingApprovals.length === 0;
+    wrap.querySelectorAll("[data-apact]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const id = b.dataset.apid, decision = b.dataset.apact;
+        try {
+          await api("POST", `/api/approvals/${id}/${decision === "granted" ? "grant" : "deny"}`);
+          // Banner-Update kommt via approval.decided-WS — kein lokales popping
+        } catch (err) { toast(err.message); }
+      }));
+  }
+  function renderAgentsBadge() {
+    // Agent-Karten: ⛔-Badge wenn approvalGate (übersichtlich, kein extra Feld)
+    document.querySelectorAll("#agentCards .card").forEach((card) => {
+      const id = card.querySelector("[data-edit]")?.dataset.edit;
+      const ag = state.agents.find((x) => x.id === id);
+      if (!ag) return;
+      let badge = card.querySelector(".gate-badge");
+      if (ag.approvalGate) {
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "gate-badge";
+          badge.title = "Antworten brauchen Freigabe (Approval-Gate)";
+          const sub = card.querySelector(".sub");
+          if (sub) sub.after(badge);
+        }
+        badge.textContent = " ⛔ Gate";
+      } else if (badge) badge.remove();
+    });
+  }
   // ── P1#3: Browser-Notifications (Codex-Matrix 1.3) ──
   // Pref in localStorage[relay.notify]="on"|"off"; permission nur on-demand
   // beim Einschalten; Notification nur für fremd-Raum-Nachrichten UND
@@ -251,6 +307,29 @@
         // renderRoomList die Raum-Dots aus der neuen Presence-Ableitung
         loadAgents();
         renderRoomList();
+        break;
+      }
+      case "approval.required": {
+        // P2#2: Turn hält an — Banner zeigt Entscheidungskarten (Matrix-16:
+        // AuditCard = Kind-Badge + Reason + Buttons nur bei pending)
+        pendingApprovals.push(e.approval);
+        renderApprovalBanner();
+        break;
+      }
+      case "task.comment.created": {
+        // P2#1: offenes Panel live füttern (anderes Fenster/Agent)
+        const panel = document.querySelector(`.task-chat[data-for-task="${e.taskId}"]`);
+        if (panel && e.comment) {
+          panel.querySelector(".task-chat-list").insertAdjacentHTML("beforeend", `
+            <div class="tc-item ${e.comment.authorKind}"><span class="tc-who">${e.comment.authorKind === "agent" ? "🤖" : "🧑"} ${esc(e.comment.authorName)}</span><span class="tc-text">${esc(e.comment.content)}</span><span class="tc-time">${esc(fmtTime(e.comment.createdAt))}</span></div>`);
+          panel.querySelector(".task-chat-list").scrollTop = 9999;
+        }
+        break;
+      }
+      case "approval.decided": {
+        // Banner-Karte entfernen (decision kommt mit approval-Objekt)
+        pendingApprovals = pendingApprovals.filter((x) => x.id !== e.approval?.id);
+        renderApprovalBanner();
         break;
       }
       case "message.updated": {
@@ -876,6 +955,12 @@
         ${rxBar}
       </div>`;
   }
+  function humanName() {
+    // Backend-Fallback-Identität (RELAY_USER_NAME, default gaRON): der Browser
+    // kennt die env nicht — sessionStorage-Bridge (Relay-Name aus settings)
+    const n = state.settings?.relayUser ?? "";
+    return String(n || "gaRON");
+  }
   function fmtSize(n) {
     if (n == null) return "";
     if (n > 1048576) return (n / 1048576).toFixed(1) + " MB";
@@ -1015,19 +1100,48 @@
     const m = upTo.match(/@([\w-]*)$/);
     if (!m) return hideMention();
     const q = m[1].toLowerCase();
+    const activeInRoom = (state.rooms.find((r) => r.id === state.currentRoomId)?.memberAgentIds) || [];
     mentionChoices = state.agents.filter((a) => a.enabled)
       .filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
       .slice(0, 6);
-    if (!mentionChoices.length) return hideMention();
+    // P1#4-Lane 2 (Matrix-7): nicht im Raum = invite-Zeile statt Sackgasse
+    const candidates = state.agents.filter((a) => a.enabled && !activeInRoom.includes(a.id))
+      .filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+    if (!mentionChoices.length && !candidates.length) return hideMention();
     mentionSel = 0;
     const pop = $("#mentionPop");
-    pop.innerHTML = mentionChoices.map((a, i) => `
+    const rowsH = mentionChoices.map((a, i) => `
       <button type="button" class="${i === mentionSel ? "sel" : ""}" data-mid="${a.id}">
         <span class="swatch" style="background:${esc(a.color)}"></span>${esc(a.emoji)} <strong>${esc(a.name)}</strong>
+      </button>`).join("")
+      // invite-inline: "@x einladen?" je Nicht-Member-Kandidat (Matrix-7: inline statt Dialog)
+      + candidates.slice(0, 3).map((a) => `
+      <button type="button" class="invite-row" data-invid="${a.id}" title="Zum Raum hinzuziehen + erwähnen">
+        <span class="inv-ico">＋</span> ${esc(a.emoji)} <strong>${esc(a.name)}</strong> einladen?
       </button>`).join("");
+    pop.innerHTML = rowsH;
     pop.hidden = false;
     pop.querySelectorAll("[data-mid]").forEach((b) =>
       b.addEventListener("click", () => applyMention(b.dataset.mid)));
+    pop.querySelectorAll("[data-invid]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const aid = b.dataset.invid;
+        const rid = state.currentRoomId;
+        if (!rid) return;
+        try {
+          const room = state.rooms.find((r) => r.id === rid);
+          const kind = room?.kind;
+          if (kind === "project") {
+            const ids = [...(room?.memberAgentIds || []), aid];
+            await api("PATCH", `/api/rooms/${rid}`, { agentIds: ids });
+          } else {
+            await api("POST", `/api/rooms/${rid}/members`, { agentId: aid });
+          }
+          await loadRooms();
+          await selectRoom(rid);
+          applyMention(aid);
+        } catch (err) { toast(err.message); }
+      }));
   }
   function mentionKey(ev) {
     if ($("#mentionPop").hidden) return false;
@@ -1161,6 +1275,7 @@
         </div>
       </div>`).join("");
     el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => agentModal(b.dataset.edit)));
+    renderAgentsBadge();
     el.querySelectorAll("[data-del]").forEach((b) =>
       b.addEventListener("click", async () => {
         const a = state.agents.find((x) => x.id === b.dataset.del);
@@ -1183,9 +1298,11 @@
       { label: "API-Key (write-only — leer = unverändert)", name: "apiKey", type: "password", value: "" },
       { label: "System-Prompt", name: "systemPrompt", type: "textarea", value: a?.systemPrompt ?? "" },
       { label: "Aktiv", name: "enabled", type: "checkbox", checked: a ? !!a.enabled : true },
+      { label: "Approval-Gate (Antworten brauchen Freigabe)", name: "approvalGate", type: "checkbox", checked: a ? !!a.approvalGate : false },
     ], async (form) => {
       const data = Object.fromEntries(new FormData(form).entries());
       data.enabled = form.enabled.checked;
+      data.approvalGate = form.approvalGate?.checked || false;
       if (form.apiKey && !form.apiKey.value) {
         const { apiKey, ...rest } = data; data = rest; // write-only: nie leeren
       }
@@ -1285,10 +1402,10 @@
         </div>
         <div class="columns">
           ${COLUMNS.map(([key, label]) => `
-            <div class="column">
+            <div class="column" data-col-key="${key}">
               <h4>${label} <span class="col-count">${tasks.filter((t) => t.status === key).length}</span></h4>
               ${tasks.filter((t) => t.status === key).map((t) => `
-                <div class="task ${t.status === "done" ? "done" : ""}">
+                <div class="task ${t.status === "done" ? "done" : ""}" draggable="true" data-taskdrag="${t.id}">
                   ${statusBadge(t.status)}
                   <span>${esc(t.title)}</span>
                   <span class="who">${t.assignee ? `@${esc(assigneeName(t.assignee))}` : ""}</span>
@@ -1296,6 +1413,7 @@
                     ${t.status !== "todo" ? `<button data-tmove="${t.id}:${prevStatus(t.status)}" title="zurück">←</button>` : ""}
                     ${t.status !== "done" ? `<button data-tmove="${t.id}:${nextStatus(t.status)}" title="weiter">→</button>` : ""}
                     <button data-tedit="${t.id}" title="Bearbeiten">✎</button>
+                    <button data-tchat="${t.id}" title="Chatter anzeigen">💬</button>
                     <button data-tdel="${t.id}" title="löschen">✕</button>
                   </span>
                 </div>`).join("") || `<div class="hint" style="padding:4px 2px">—</div>`}
@@ -1315,6 +1433,78 @@
       renderInlineBoard();
     }));
     el.querySelectorAll("[data-tedit]").forEach((b) => b.addEventListener("click", () => taskEditModal(b.dataset.tedit)));
+    el.querySelectorAll("[data-tchat]").forEach((b) => b.addEventListener("click", () => toggleTaskChat(b.dataset.tchat)));
+    // Lane 2 (Matrix-24): Spalten als Drop-Zonen — Task-Karten per HTML5-DnD
+    // zwischen Status-Spalten; Anker: dataTransfer (real drag), Fallback
+    // __lastTaskDrag (headless-DragEvent-Synthese ohne dataTransfer-Übernahme).
+    el.querySelectorAll(".column").forEach((col) => {
+      col.addEventListener("dragover", (ev) => { ev.preventDefault(); col.classList.add("drop-col"); });
+      col.addEventListener("dragleave", () => col.classList.remove("drop-col"));
+      col.addEventListener("drop", async (ev) => {
+        ev.preventDefault(); col.classList.remove("drop-col");
+        let tid = "";
+        try { tid = ev.dataTransfer?.getData("text/task-id") || ""; } catch {}
+        if (!tid) tid = window.__lastTaskDrag || "";
+        if (!tid) return;
+        const st = col.getAttribute("data-col-key");
+        if (!st) return;
+        try {
+          await api("PATCH", `/api/tasks/${tid}`, { status: st });
+          window.__lastTaskDrag = "";
+          renderInlineBoard();
+        } catch (err) { toast(err.message); }
+      });
+    });
+    el.querySelectorAll("[data-taskdrag]").forEach((b) =>
+      b.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/task-id", b.dataset.taskdrag);
+        ev.dataTransfer.effectAllowed = "move";
+        window.__lastTaskDrag = b.dataset.taskdrag;
+      }));
+    renderOpenChatPanels(el);
+  }
+
+  // P2#1: Chatter-Panel toggle + render (Liste + Input, WS-fed)
+  async function toggleTaskChat(taskId) {
+    state.chatTaskId = state.chatTaskId === taskId ? null : taskId;
+    await renderInlineBoard();
+  }
+  async function renderOpenChatPanels(el) {
+    if (!state.chatTaskId) return;
+    const t = state.tasks.find((x) => x.id === state.chatTaskId);
+    if (!t) { state.chatTaskId = null; return; }
+    const card = el.querySelector(`.task .t-actions [data-tchat="${t.id}"]`)?.closest(".task");
+    if (!card) return;
+    const panel = document.createElement("div");
+    panel.className = "task-chat";
+    panel.dataset.forTask = t.id;
+    const comments = await api("GET", `/api/tasks/${t.id}/comments`).catch(() => []);
+    const items = (comments || []).map((c) => `
+      <div class="tc-item ${c.authorKind}">
+        <span class="tc-who">${c.authorKind === "agent" ? "🤖" : "🧑"} ${esc(c.authorName)}</span>
+        <span class="tc-text">${esc(c.content)}</span>
+        <span class="tc-time">${esc(fmtTime(c.createdAt))}</span>
+      </div>`).join("") || `<div class="hint" style="padding:2px 0">— noch keine Kommentare —</div>`;
+    panel.innerHTML = `
+      <div class="task-chat-list">${items}</div>
+      <form class="task-chat-form">
+        <input type="text" name="content" placeholder="Kommentar… (Enter = posten)" aria-label="Kommentar" />
+        <button type="submit" class="btn primary">↑</button>
+      </form>`;
+    panel.querySelector(".task-chat-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const inp = ev.target.querySelector("input");
+      const v = inp.value.trim();
+      if (!v) return;
+      inp.value = "";
+      await api("POST", `/api/tasks/${t.id}/comments`, { content: v });
+      // Panel live: WS task.comment.created refresht; Fallback hier direkt
+      const list = panel.querySelector(".task-chat-list");
+      list.insertAdjacentHTML("beforeend", `<div class="tc-item human"><span class="tc-who">🧑 ${esc(humanName())}</span><span class="tc-text">${esc(v)}</span><span class="tc-time">jetzt</span></div>`);
+      list.scrollTop = list.scrollHeight;
+    });
+    panel.querySelector("input")?.focus?.();
+    card.after(panel);
   }
 
   function taskEditModal(taskId) {
@@ -1684,6 +1874,12 @@
     } catch { state.adapters = ["echo"]; }
     restoreLastRead();
     updateNotifyLabel();
+    // P2#2: Pendings beim Boot laden (sonst ist das Banner nach Reload leer,
+    // obwohl WS-Events während der Abwesenheit pendende Freigaben hinterließen)
+    api("GET", "/api/approvals?status=pending").then((aps) => {
+      pendingApprovals = aps || [];
+      renderApprovalBanner();
+    }).catch(() => {});
     await Promise.all([loadRooms(), loadAgents()]);
     if (state.rooms.length) selectRoom(state.rooms[0].id);
     connectWS();

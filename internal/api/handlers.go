@@ -157,6 +157,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/attachments/{id}", s.serveAttachment)
 	mux.HandleFunc("POST /api/messages/{id}/reactions", s.addReaction)
 	mux.HandleFunc("DELETE /api/messages/{id}/reactions/{emoji}", s.removeReaction)
+	mux.HandleFunc("GET /api/tasks/{id}/comments", s.listTaskComments)
+	mux.HandleFunc("POST /api/tasks/{id}/comments", s.addTaskComment)
+	mux.HandleFunc("GET /api/approvals", s.listApprovals)
+	mux.HandleFunc("POST /api/approvals/{id}/grant", s.decideApprovalGranted)
+	mux.HandleFunc("POST /api/approvals/{id}/deny", s.decideApprovalDenied)
 	mux.HandleFunc("GET /api/rooms/{id}/search", s.searchMessages)
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
@@ -298,6 +303,7 @@ type agentBody struct {
 	BaseURL      string `json:"baseUrl"`
 	APIKey       string `json:"apiKey"`
 	Enabled      *bool  `json:"enabled"`
+	ApprovalGate *bool  `json:"approvalGate"` // P2#2: Turn-Halt vor Stream
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
@@ -407,6 +413,9 @@ func (s *Server) patchAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Enabled != nil {
 		existing.Enabled = *b.Enabled
+	}
+	if b.ApprovalGate != nil {
+		existing.ApprovalGate = *b.ApprovalGate
 	}
 	existing.UpdatedAt = nowISO()
 	if err := s.st.UpdateAgent(existing); err != nil {

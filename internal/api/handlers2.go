@@ -619,6 +619,108 @@ func (s *Server) listReplies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, msgs)
 }
 
+// ── approvals (P2#2, paperclip approvals.ts) ────────────────────────
+
+func (s *Server) listApprovals(w http.ResponseWriter, r *http.Request) {
+	aps, err := s.st.ListApprovals(r.URL.Query().Get("status"))
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if aps == nil {
+		aps = []*store.Approval{}
+	}
+	writeJSON(w, 200, aps)
+}
+
+func decideApproval(s *Server, decision string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Race-Schutz: erste Entscheidung gewinnt (store.DecideApproval)
+		ok, err := s.st.DecideApproval(r.PathValue("id"), decision)
+		if err != nil {
+			errJSON(w, 500, "interner Fehler")
+			return
+		}
+		if !ok {
+			errJSON(w, 409, "Approval nicht mehr pending")
+			return
+		}
+		ap, _ := s.st.GetApproval(r.PathValue("id"))
+		s.broadcast(map[string]any{"type": "approval.decided", "approval": ap, "ts": time.Now().UnixMilli()})
+		if decision == "granted" && ap != nil {
+			if err := s.rt.ResumeApproval(ap); err != nil {
+				log.Printf("[api] approval resume: %v", err)
+				s.broadcast(map[string]any{"type": "system", "roomId": "", "text": "⚠️ Approval-Resume fehlgeschlagen: " + err.Error()})
+			}
+		}
+		writeJSON(w, 200, ap)
+	}
+}
+
+func (s *Server) decideApprovalGranted(w http.ResponseWriter, r *http.Request) {
+	decideApproval(s, "granted")(w, r)
+}
+
+func (s *Server) decideApprovalDenied(w http.ResponseWriter, r *http.Request) {
+	decideApproval(s, "denied")(w, r)
+}
+
+// ── task chatter (P2#1, paperclip task-chat) ────────────────────────
+
+func (s *Server) listTaskComments(w http.ResponseWriter, r *http.Request) {
+	cs, err := s.st.ListTaskComments(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	if cs == nil {
+		cs = []*store.TaskComment{}
+	}
+	writeJSON(w, 200, cs)
+}
+
+func (s *Server) addTaskComment(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("id")
+	t, err := s.st.GetTask(taskID)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if t == nil {
+		errJSON(w, 404, "Task nicht gefunden")
+		return
+	}
+	var b struct {
+		Content string `json:"content"`
+		AgentID string `json:"agentId,omitempty"` // v2: Agent-Kommentar via Relay-UI
+	}
+	if err := decode(r, &b); err != nil {
+		errJSON(w, 400, "ungültiges JSON")
+		return
+	}
+	content := strings.TrimSpace(b.Content)
+	if content == "" {
+		errJSON(w, 400, "content erforderlich")
+		return
+	}
+	kind, name := "human", humanName()
+	if b.AgentID != "" {
+		ag, err := s.st.GetAgent(b.AgentID)
+		if err != nil || ag == nil {
+			errJSON(w, 404, "Agent nicht gefunden")
+			return
+		}
+		kind, name = "agent", ag.Name
+	}
+	c, err := s.st.AddTaskComment(taskID, kind, name, content)
+	if err != nil {
+		errJSON(w, 500, "interner Fehler")
+		return
+	}
+	s.broadcast(map[string]any{"type": "task.comment.created", "taskId": taskID, "comment": c, "ts": time.Now().UnixMilli()})
+	writeJSON(w, 201, c)
+}
+
 // getMessage (P1#1-Begleiter): Einzelabruf für WS-Refresh (message.updated).
 func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := s.st.GetMessage(r.PathValue("id"))

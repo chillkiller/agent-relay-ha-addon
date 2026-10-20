@@ -83,6 +83,18 @@ func (r *Runtime) AdapterIDs() []string {
 	return ids
 }
 
+// ResumeApproval (P2#2): Freigabe re-enqueued den Original-Turn —
+// OnUserMessage-Weg (Mention-Treffer identisch zur Original-Auslösung,
+// enqueueTurn-Kette latest-wins bleibt intakt).
+func (r *Runtime) ResumeApproval(ap *store.Approval) error {
+	m, err := r.st.GetMessage(ap.UserMsgID)
+	if err != nil || m == nil {
+		return fmt.Errorf("original message %s nicht gefunden", ap.UserMsgID)
+	}
+	r.OnUserMessage(m)
+	return nil
+}
+
 // OnUserMessage is called after a human message is persisted.
 func (r *Runtime) OnUserMessage(m *store.Message) {
 	agents, err := r.st.RoomAgents(m.RoomID)
@@ -266,6 +278,33 @@ func (r *Runtime) turn(a *store.Agent, userMsg *store.Message) error {
 			"message": updated(r.st, msgID),
 		})
 		return nil
+	}
+
+	// P2#2 (Codex-Matrix 2.2, paperclip approvals.ts-Muster): Approval-Gate —
+	// bei Agent-Flag approval_gate hält der Turn VOR dem Stream an:
+	// pending-Approval persistieren, WS approval.required, Turn sauber
+	// beenden; die Freigabe re-enqueued den Original-Turn über die
+	// bestehende enqueueTurn-Kette (latest-wins bleibt intakt).
+	if a.ApprovalGate {
+		// P2#2: Offener Grant-Token für DIESES Turn-Paar? → konsumieren und
+		// durchstreamen (Resume-Weg; sonst endlos-Re-Trigger des Gates).
+		if granted, _ := r.st.FindGrantedApproval(a.ID, userMsg.ID); granted != nil {
+			_ = r.st.ConsumeApproval(granted.ID)
+		} else {
+			ap := &store.Approval{
+				ID:        store.NewID("appr"),
+				AgentID:   a.ID,
+				UserMsgID: userMsg.ID,
+				Reason:    fmt.Sprintf("Turn angehalten — Freigabe für @%s-Antwort", a.Name),
+				Status:    "pending",
+				CreatedAt: nowRFC3339(),
+			}
+			if err := r.st.InsertApproval(ap); err != nil {
+				return err
+			}
+			r.publish("approval.required", map[string]any{"approval": ap})
+			return nil
+		}
 	}
 
 	history := r.history(cfg.ID, userMsg.RoomID)

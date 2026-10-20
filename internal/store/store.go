@@ -33,6 +33,7 @@ type Agent struct {
 	Enabled   bool   `json:"enabled"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
+	ApprovalGate bool `json:"approvalGate"` // P2#2: Turn hält vor Stream bis grant
 }
 
 type Project struct {
@@ -81,6 +82,26 @@ type Attachment struct {
 	Size      int64  `json:"size"`
 	Path      string `json:"-"` // server-side only (no fs layout leak)
 	CreatedAt string `json:"createdAt"`
+}
+
+type TaskComment struct {
+	ID        string `json:"id"`
+	TaskID    string `json:"taskId"`
+	AuthorKind string `json:"authorKind"` // human|agent|system
+	AuthorName string `json:"authorName"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type Approval struct {
+	ID        string `json:"id"`
+	AgentID   string `json:"agentId"`
+	UserMsgID string `json:"userMsgId"`
+	Reason    string `json:"reason"`
+	Status    string `json:"status"` // pending|granted|denied
+	CreatedAt string `json:"createdAt"`
+	DecidedAt string `json:"decidedAt,omitempty"`
+	ConsumedAt string `json:"consumedAt,omitempty"` // P2#2: Grant-Token verbraucht (Audit)
 }
 
 type Task struct {
@@ -164,6 +185,21 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("rooms.position alter: %w", err)
 		}
 	}
+	// P2#2 (Codex-Matrix 2.2): approval_gate pro Agent (Turn-Halt vor Stream).
+	if _, err := db.Exec(`ALTER TABLE agents ADD COLUMN approval_gate INTEGER NOT NULL DEFAULT 0`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("agents.approval_gate alter: %w", err)
+		}
+	}
+	// P2#2: consumed_at — Grant-Token wird beim Resume-Turn verbraucht
+	// (sonst re-triggert turn() das Gate endlos).
+	if _, err := db.Exec(`ALTER TABLE approvals ADD COLUMN consumed_at TEXT`); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "no such table") {
+			return fmt.Errorf("approvals.consumed_at alter: %w", err)
+		}
+	}
 	// P1#4 (Codex-Matrix 1.5): Threads — parent_id auf messages. Nullable,
 	// deshalb genügt das idempotente ADD COLUMN (kein Rebuild).
 	if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN parent_id TEXT REFERENCES messages(id) ON DELETE CASCADE`); err != nil {
@@ -236,7 +272,8 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT NOT NULL DEFAULT '🤖',
   color TEXT NOT NULL DEFAULT '#6ea8fe', system_prompt TEXT NOT NULL DEFAULT '',
   adapter TEXT NOT NULL DEFAULT 'echo', model TEXT, base_url TEXT, api_key TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  enabled INTEGER NOT NULL DEFAULT 1, approval_gate INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
@@ -291,6 +328,31 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
+-- Task-Chatter (P2#1, Codex-Matrix 2.1, paperclip task-chat/task-workspaces):
+-- persistenter Kommentar-Verlauf je Task (Mensch + Agents, gleiche Fläche).
+CREATE TABLE IF NOT EXISTS task_comments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_kind TEXT NOT NULL CHECK (author_kind IN ('human','agent','system')),
+  author_name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, created_at);
+-- Approvals (P2#2, Codex-Matrix 2.2, paperclip approvals.ts-Muster):
+-- Agent-Turn hält VOR adapt.Stream an, bis der Mensch grant|deny wählt;
+-- Entscheidung läuft als enqueueTurn-Kette weiter (kein neuer Thread).
+CREATE TABLE IF NOT EXISTS approvals (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  user_msg_id TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','granted','denied')),
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_pending ON approvals(status, created_at);
 `)
 	return err
 }

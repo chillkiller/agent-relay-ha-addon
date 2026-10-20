@@ -893,3 +893,41 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 .tc-x:hover { color: var(--ink); }
 @keyframes relay-flash { 0% { background: rgba(255,92,92,.18); } 100% { background: transparent; } }
 .msg.flash { animation: relay-flash 1.6s ease-out; }
+
+/* ── P2#2 Approvals-UI (paperclip ApprovalCard-Muster, Matrix-16) ── */
+.approval-banner {
+  max-width: 948px; width: calc(100% - var(--sp-6));
+  margin: 0 auto var(--sp-2); display: grid; gap: 6px;
+}
+.approval-card {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--s2); border: 1px solid var(--warn);
+  border-radius: var(--r-lg); padding: 10px 14px;
+  box-shadow: var(--shadow-lg);
+}
+.ap-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ap-pill { color: var(--warn); background: rgba(245,158,11,.14); }
+.ap-reason { color: var(--ink-3); font-size: 12px; flex: 1; min-width: 180px; }
+.ap-actions { display: inline-flex; gap: 8px; }
+.ap-actions .btn { flex: none; }
+.gate-badge { color: var(--warn); font-size: 11.5px; font-weight: 650; margin-left: 6px; }
+.card .sub { margin-bottom: 2px; } /* Badge sitzt neben sub ohne spring */
+
+/* ── P2#1 Chatter + Lane 2 DnD/Invite ─────────────── */
+.task-chat {
+  background: var(--s2); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 8px 10px; margin: -2px 0 8px;
+}
+.task-chat-list { display: grid; gap: 3px; max-height: 220px; overflow-y: auto; }
+.tc-item { display: flex; gap: 6px; align-items: baseline; font-size: 12px; padding: 3px 6px; border-radius: var(--r-md); }
+.tc-item:hover { background: var(--s3); }
+.tc-item.agent { background: rgba(94,106,210,.08); }
+.tc-who { flex: none; font-weight: 600; color: var(--ink-2); }
+.tc-text { flex: 1; min-width: 0; color: var(--ink); word-wrap: break-word; }
+.tc-time { flex: none; color: var(--ink-4); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.task-chat-form { display: flex; gap: 6px; margin-top: 6px; }
+.task-chat-form input { flex: 1; }
+.task[draggable="true"] { cursor: grab; }
+.column.drop-col { box-shadow: inset 0 0 0 1px var(--accent); background: rgba(255,92,92,.05); }
+.invite-row { color: var(--ok); }
+.inv-ico { font-weight: 700; }

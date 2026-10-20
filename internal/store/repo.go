@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 )
 
@@ -52,7 +53,7 @@ func scanAgent(r rowScanner) (*Agent, error) {
 	a := &Agent{}
 	var model, baseURL, apiKey sql.NullString
 	if err := r.Scan(&a.ID, &a.Name, &a.Emoji, &a.Color, &a.SystemPrompt, &a.Adapter,
-		&model, &baseURL, &apiKey, &a.Enabled, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&model, &baseURL, &apiKey, &a.Enabled, &a.ApprovalGate, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
 	a.Model, a.BaseURL, a.APIKey = model.String, baseURL.String, apiKey.String
@@ -60,7 +61,7 @@ func scanAgent(r rowScanner) (*Agent, error) {
 }
 
 func (d *DB) ListAgents() ([]*Agent, error) {
-	rows, err := d.db.Query(`SELECT id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,created_at,updated_at FROM agents ORDER BY created_at`)
+	rows, err := d.db.Query(`SELECT id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,approval_gate,created_at,updated_at FROM agents ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +78,7 @@ func (d *DB) ListAgents() ([]*Agent, error) {
 }
 
 func (d *DB) GetAgent(id string) (*Agent, error) {
-	r := d.db.QueryRow(`SELECT id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,created_at,updated_at FROM agents WHERE id=?`, id)
+	r := d.db.QueryRow(`SELECT id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,approval_gate,created_at,updated_at FROM agents WHERE id=?`, id)
 	a, err := scanAgent(r)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -87,19 +88,19 @@ func (d *DB) GetAgent(id string) (*Agent, error) {
 
 func agentInsertValues(a *Agent) []any {
 	return []any{a.ID, a.Name, a.Emoji, a.Color, a.SystemPrompt, a.Adapter,
-		nullable(a.Model), nullable(a.BaseURL), nullable(a.APIKey), boolInt(a.Enabled), a.CreatedAt, a.UpdatedAt}
+		nullable(a.Model), nullable(a.BaseURL), nullable(a.APIKey), boolInt(a.Enabled), boolInt(a.ApprovalGate), a.CreatedAt, a.UpdatedAt}
 }
 
 func (d *DB) InsertAgent(a *Agent) error {
 	_, err := d.db.Exec(`INSERT INTO agents
-	(id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,created_at,updated_at)
-	VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, agentInsertValues(a)...)
+	(id,name,emoji,color,system_prompt,adapter,model,base_url,api_key,enabled,approval_gate,created_at,updated_at)
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, agentInsertValues(a)...)
 	return err
 }
 
 func (d *DB) UpdateAgent(a *Agent) error {
-	_, err := d.db.Exec(`UPDATE agents SET name=?,emoji=?,color=?,system_prompt=?,adapter=?,model=?,base_url=?,api_key=?,enabled=?,updated_at=? WHERE id=?`,
-		a.Name, a.Emoji, a.Color, a.SystemPrompt, a.Adapter, nullable(a.Model), nullable(a.BaseURL), nullable(a.APIKey), boolInt(a.Enabled), now(), a.ID)
+	_, err := d.db.Exec(`UPDATE agents SET name=?,emoji=?,color=?,system_prompt=?,adapter=?,model=?,base_url=?,api_key=?,enabled=?,approval_gate=?,updated_at=? WHERE id=?`,
+		a.Name, a.Emoji, a.Color, a.SystemPrompt, a.Adapter, nullable(a.Model), nullable(a.BaseURL), nullable(a.APIKey), boolInt(a.Enabled), boolInt(a.ApprovalGate), now(), a.ID)
 	return err
 }
 
@@ -442,7 +443,7 @@ func (d *DB) RemoveRoomMember(roomID, agentID string) error {
 
 func (d *DB) RoomAgents(roomID string) ([]*Agent, error) {
 	rows, err := d.db.Query(`
-		SELECT a.id,a.name,a.emoji,a.color,a.system_prompt,a.adapter,a.model,a.base_url,a.api_key,a.enabled,a.created_at,a.updated_at
+		SELECT a.id,a.name,a.emoji,a.color,a.system_prompt,a.adapter,a.model,a.base_url,a.api_key,a.enabled,a.approval_gate,a.created_at,a.updated_at
 		FROM agents a JOIN room_members m ON m.agent_id=a.id
 		WHERE m.room_id=? AND a.enabled=1 ORDER BY a.created_at`, roomID)
 	if err != nil {
@@ -620,6 +621,124 @@ func (d *DB) GetAttachment(id string) (*Attachment, error) {
 		return nil, err
 	}
 	return a, nil
+}
+
+// ── approvals (P2#2, paperclip approvals.ts-Muster) ─────────────────
+
+func (d *DB) InsertApproval(a *Approval) error {
+	_, err := d.db.Exec(`INSERT INTO approvals (id,agent_id,user_msg_id,reason,status,created_at,decided_at) VALUES (?,?,?,?,?,?,?)`,
+		a.ID, a.AgentID, a.UserMsgID, a.Reason, a.Status, a.CreatedAt, a.DecidedAt)
+	return err
+}
+
+// FindGrantedApproval: offener Grant-Token für das Turn-Paar
+// (agent, userMsg) — wird beim Resume-Turn konsumiert.
+func (d *DB) FindGrantedApproval(agentID, userMsgID string) (*Approval, error) {
+	row := d.db.QueryRow(`SELECT id,agent_id,user_msg_id,reason,status,created_at,decided_at,consumed_at FROM approvals
+		WHERE agent_id=? AND user_msg_id=? AND status='granted' AND consumed_at IS NULL
+		ORDER BY decided_at DESC LIMIT 1`, agentID, userMsgID)
+	a := &Approval{}
+	var decided, consumed sql.NullString
+	if err := row.Scan(&a.ID, &a.AgentID, &a.UserMsgID, &a.Reason, &a.Status, &a.CreatedAt, &decided, &consumed); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	a.DecidedAt = decided.String
+	a.ConsumedAt = consumed.String
+	return a, nil
+}
+
+// ConsumeApproval: Grant-Token verbrennen (Execution-Paar; Audit bleibt).
+func (d *DB) ConsumeApproval(id string) error {
+	_, err := d.db.Exec(`UPDATE approvals SET consumed_at=? WHERE id=? AND consumed_at IS NULL`, now(), id)
+	return err
+}
+
+// ListApprovals: status="" = alle (neueste zuerst), sonst Filter.
+func (d *DB) AddTaskComment(taskID, authorKind, authorName, content string) (*TaskComment, error) {
+	c := &TaskComment{
+		ID: NewID("tc"), TaskID: taskID, AuthorKind: authorKind,
+		AuthorName: authorName, Content: content, CreatedAt: now(),
+	}
+	_, err := d.db.Exec(`INSERT INTO task_comments (id,task_id,author_kind,author_name,content,created_at) VALUES (?,?,?,?,?,?)`,
+		c.ID, c.TaskID, c.AuthorKind, c.AuthorName, c.Content, c.CreatedAt)
+	return c, err
+}
+
+func (d *DB) ListTaskComments(taskID string) ([]*TaskComment, error) {
+	rows, err := d.db.Query(`SELECT id,task_id,author_kind,author_name,content,created_at FROM task_comments WHERE task_id=? ORDER BY created_at ASC LIMIT 500`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*TaskComment
+	for rows.Next() {
+		c := &TaskComment{}
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.AuthorKind, &c.AuthorName, &c.Content, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetApproval(id string) (*Approval, error) {
+	row := d.db.QueryRow(`SELECT id,agent_id,user_msg_id,reason,status,created_at,decided_at,consumed_at FROM approvals WHERE id=?`, id)
+	a := &Approval{}
+	var decided, consumed sql.NullString
+	if err := row.Scan(&a.ID, &a.AgentID, &a.UserMsgID, &a.Reason, &a.Status, &a.CreatedAt, &decided, &consumed); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	a.DecidedAt = decided.String
+	a.ConsumedAt = consumed.String
+	return a, nil
+}
+
+func (d *DB) ListApprovals(status string) ([]*Approval, error) {
+	q := `SELECT id,agent_id,user_msg_id,reason,status,created_at,decided_at,consumed_at FROM approvals`
+	var rows *sql.Rows
+	var err error
+	if status != "" {
+		rows, err = d.db.Query(q+` WHERE status=? ORDER BY created_at DESC LIMIT 200`, status)
+	} else {
+		rows, err = d.db.Query(q+` ORDER BY created_at DESC LIMIT 200`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Approval
+	for rows.Next() {
+		a := &Approval{}
+		var decided, consumed sql.NullString
+		if err := rows.Scan(&a.ID, &a.AgentID, &a.UserMsgID, &a.Reason, &a.Status, &a.CreatedAt, &decided, &consumed); err != nil {
+			return nil, err
+		}
+		a.DecidedAt = decided.String
+		a.ConsumedAt = consumed.String
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// DecideApproval: grant|deny + Zeitstempel; false wenn nicht mehr pending
+// (Race-Schutz: zweite Entscheidung überschreibt nicht die erste).
+func (d *DB) DecideApproval(id, decision string) (bool, error) {
+	if decision != "granted" && decision != "denied" {
+		return false, fmt.Errorf("ungültige Entscheidung %q", decision)
+	}
+	res, err := d.db.Exec(`UPDATE approvals SET status=?, decided_at=? WHERE id=? AND status='pending'`,
+		decision, now(), id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (d *DB) InsertMessage(m *Message) error {
