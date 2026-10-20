@@ -1025,6 +1025,10 @@
     const streaming = m.status === "streaming" && streamBuf[m.id] !== undefined;
     const cls = ["msg", m.senderKind, m.status === "error" ? "error" : "", streaming ? "streaming" : "", groupFirst ? "group-first" : ""].filter(Boolean).join(" ");
     const swatch = agent ? `<span class="swatch" style="background:${esc(agent.color)}"></span>` : "";
+    // buzz-DNA (GaRoN 21:40): jede Message-Row trägt einen 36px-Runden-Avatar
+    // (Agent-Emoji auf Agent-Farbe; Mensch = „G" auf ok-grün), Meta + Content
+    // liegen in .msg-main daneben — flache Rows, keine Bubbles.
+    const rowAvatar = `<span class="avatar" style="background:${agent ? esc(agent.color) : "var(--ok)"}">${agent ? esc(agent.emoji) : "G"}</span>`;
     // Sprint-3b (Matrix-12): Agent-Turns als einklappbare Gruppe
     // (details/summary — plain-JS-Form des OpenClaw-Disclosures).
     // Head: "schreibt seit X s" live / nach Fertigstellung "X s · Y Frames".
@@ -1037,25 +1041,29 @@
       return `
       <details class="${cls} turn" data-mid="${m.id}" ${streaming ? "open" : ""}>
         <summary class="meta">
-          ${swatch}<span class="who">${esc(who)}</span>
+          ${rowAvatar}<span class="msg-main"><span class="who">${esc(who)}</span>
           ${headLabel}
           ${replyBadge}
-          <span class="time">${esc(time)}</span>
+          <span class="time">${esc(time)}</span></span>
         </summary>
+        <div class="msg-main">
         ${threadMark}
         <div class="content">${renderContent(body)}</div>
         ${attHtml}
         ${streaming ? "" : rxBar}
+        </div>
       </details>`;
     }
     return `
       <div class="${cls}" data-mid="${m.id}">
-        <div class="meta">${swatch}<span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
+        ${rowAvatar}<div class="msg-main">
+        <div class="meta"><span class="who">${esc(who)}</span><span class="time">${esc(time)}</span></div>
         ${threadMark}
         <div class="content">${renderContent(streaming ? streamBuf[m.id] : m.content)}</div>
         ${attHtml}
         ${replyBadge}
         ${rxBar}
+        </div>
       </div>`;
   }
   function humanName() {
