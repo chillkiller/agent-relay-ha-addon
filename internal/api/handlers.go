@@ -207,8 +207,11 @@ func (s *Server) authorized(r *http.Request) bool {
 	if strings.HasPrefix(auth, "Bearer ") && subtle.ConstantTimeCompare([]byte(auth[7:]), []byte(s.bearer)) == 1 {
 		return true
 	}
-	if tok := r.URL.Query().Get("token"); tok != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.bearer)) == 1 {
-		return true
+	// Codex-Audit P2-4: Query-Token NUR für WS-Upgrade (Browser-Contract); REST verlangt Header (Query-Strings leak in Proxy-Logs)
+	if r.URL.Path == "/ws" {
+		if tok := r.URL.Query().Get("token"); tok != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.bearer)) == 1 {
+			return true
+		}
 	}
 	return false
 }

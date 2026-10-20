@@ -916,7 +916,7 @@
     }
     const agent = m.agentId ? state.agents.find((a) => a.id === m.agentId) : null;
     const rx = (state.reactions[m.id] || [])
-      .map((r) => `<button class="rx-chip ${r.actors.includes("Du") ? "mine" : ""}" data-rx="${m.id}:${r.emoji}" title="${esc(r.actors.join(", "))}">${r.emoji} ${r.count}</button>`).join("");
+      .map((r) => `<button class="rx-chip ${r.actors.includes("Du") ? "mine" : ""}" data-rx="${m.id}:${esc(r.emoji)}" title="${esc(r.actors.join(", "))}">${esc(r.emoji)} ${r.count}</button>`).join("");
     // Sprint-3c (Matrix-33): Hover-Aktionen (Kopieren/Antworten/Bearbeiten)
     // neben dem Reaktions-＋ — opacity-0→1 per .msg:hover (CSS), Touch immer
     const actions = m.senderKind === "system" ? "" :

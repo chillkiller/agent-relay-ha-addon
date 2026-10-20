@@ -414,6 +414,11 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "content erforderlich")
 		return
 	}
+	// Codex-Audit P3-3: content-cap Parität zu edit (16000 — Amplification-Gate)
+	if len(content) > 16000 {
+		errJSON(w, 400, "content zu lang (max 16000)")
+		return
+	}
 	m := &store.Message{
 		ID:         newIDs("msg"),
 		RoomID:     roomID,
@@ -426,11 +431,18 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// P1#4: parent_id nur setzen, wenn die Wurzel existiert (gleicher Raum —
 	// Threads bleiben räumlich verankert; cross-room replies sind nicht v1)
-	if strings.TrimSpace(b.ParentID) != "" {
-		root, err := s.st.GetMessage(strings.TrimSpace(b.ParentID))
-		if err == nil && root != nil && root.RoomID == roomID {
-			m.ParentID = &b.ParentID
+	if pidTrim := strings.TrimSpace(b.ParentID); pidTrim != "" {
+		root, gerr := s.st.GetMessage(pidTrim)
+		if gerr != nil {
+			errJSON(w, 500, gerr.Error())
+			return
 		}
+		// Codex-Audit P3-2: invalid/cross-room parentId = 400 (kein silent drop)
+		if root == nil || root.RoomID != roomID {
+			errJSON(w, 400, "parentId muss eine Nachricht im selben Raum sein")
+			return
+		}
+		m.ParentID = &pidTrim
 	}
 	if err := s.st.InsertMessage(m); err != nil {
 		log.Printf("[api] store error: %v", err)
@@ -703,6 +715,11 @@ func decideApproval(s *Server, decision string) http.HandlerFunc {
 		ok, err := s.st.DecideApproval(r.PathValue("id"), decision)
 		if err != nil {
 			errJSON(w, 500, "interner Fehler")
+			return
+		}
+		// Codex-Audit P3-1: unbekannte ID → 404 (nicht 409 — distinct-Vertrag)
+		if ap0, _ := s.st.GetApproval(r.PathValue("id")); ap0 == nil {
+			errJSON(w, 404, "Approval nicht gefunden")
 			return
 		}
 		if !ok {
@@ -1277,6 +1294,10 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	form := r.MultipartForm
 	files := form.File["file"]
+	if len(files) > 10 {
+		errJSON(w, 400, "max 10 Dateien je Upload")
+		return
+	}
 	if len(files) == 0 {
 		errJSON(w, 400, "file-Feld erforderlich")
 		return
@@ -1300,6 +1321,10 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 			att.Mime = "application/octet-stream"
 		}
 		att.Path = filepath.Join(dir, att.ID+"-"+att.Filename)
+		if att.Size > (32 << 20) {
+			errJSON(w, 413, "Datei >32 MB")
+			return
+		}
 		dst, err := os.Create(att.Path)
 		if err != nil {
 			src.Close()
@@ -1340,6 +1365,8 @@ func (s *Server) serveAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", att.Mime)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(att.Filename, `"`, "")+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
 	http.ServeFile(w, r, att.Path)
 }
 

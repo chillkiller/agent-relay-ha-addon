@@ -272,7 +272,11 @@ func (r *Runtime) ResumeApproval(ap *store.Approval) error {
 	if !stillMember {
 		return fmt.Errorf("agent %s ist nicht mehr Mitglied des Raums", ap.AgentID)
 	}
-	r.OnUserMessage(m)
+	if a, _ := r.st.GetAgent(ap.AgentID); a != nil && a.Enabled {
+		r.enqueueTurn(a, m) // Codex-Audit P2-3: NUR der begutachtete Agent (kein Raum-Fanout, kein Treadmill)
+	} else {
+		return fmt.Errorf("agent %s nicht gefunden oder aus", ap.AgentID)
+	}
 	return nil
 }
 

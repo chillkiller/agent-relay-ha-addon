@@ -17,6 +17,7 @@ export RELAY_OPENAI_BASE_URL="$(opt openclaw_base_url)"
 export RELAY_OPENAI_API_KEY="$(opt openclaw_token)"
 export RELAY_BEARER_TOKEN="$(opt api_bearer_token)"
 export RELAY_WS_ORIGIN_REQUIRED="$(opt ws_origin_required)"
+[ -n "$RELAY_WS_ORIGIN_REQUIRED" ] || RELAY_WS_ORIGIN_REQUIRED=1  # Codex-Audit P2-5: sicher-default ON (HA-Ingress tauglich)
 export RELAY_LOG_LEVEL="$(opt log_level)"
 
 echo "[relay] starting agentrelay (user=$(id -un), data=$RELAY_DATA_DIR)"

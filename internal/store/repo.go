@@ -112,6 +112,10 @@ func (d *DB) DeleteAgent(id string) error {
 // ── reactions (quick-win 1, audit P1) ────────────────────────────────
 
 func (d *DB) AddReaction(messageID, actor, emoji string) error {
+	emoji = strings.TrimSpace(emoji)
+	if n := len([]rune(emoji)); n == 0 || n > 16 {
+		return fmt.Errorf("emoji ungültig (max 16 runes)")
+	}
 	_, err := d.db.Exec(`INSERT OR IGNORE INTO reactions (id,message_id,actor,emoji,created_at) VALUES (?,?,?,?,?)`,
 		NewID("react"), messageID, actor, emoji, now())
 	return err
