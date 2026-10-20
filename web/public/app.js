@@ -575,7 +575,7 @@
       })();
       const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("PROJEKTE", projLinked);
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
-      mount.innerHTML = roomGroupsHtml + chatsHtml + teamHtml;
+      mount.innerHTML = chatsHtml + roomGroupsHtml + teamHtml;
       bindSidebarGroups(mount);
       const qn = document.getElementById("quickNavGroups");
       if (qn) bindSidebarGroups(qn);

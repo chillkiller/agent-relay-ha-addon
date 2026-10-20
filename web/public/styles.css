@@ -281,19 +281,20 @@ body {
 }
 .roster-chip:hover { border-color: var(--line-2); background: var(--s3); }
 .roster-chip.dragover { box-shadow: 0 0 0 1px var(--accent-hover); }
-/* B2: 20px-Avatar + Presence-Dot (Control-UI sidebar-online__person) */
+/* B2: 20px-Avatar (Control-UI sidebar-online__person) — GaRoN 21:28:
+   KEIN Avatar-Dot mehr (Punkt sitzt im Chip-Ende, nicht am Avatar-Rand);
+   ::after gestrichen, Name links, Punkt rechts (margin-left:auto).
+   Der alte Block .roster-chip { display:flex … } oben (Zeile 274) ist
+   LEGACY — die Pill-Regel (21:28-Block, unten) gewinnt per Reihenfolge. */
 .roster-chip .avatar {
   width: 20px; height: 20px; border-radius: 50%; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; color: #fff; position: relative;
+  font-size: 11px; color: #fff;
 }
-.roster-chip .avatar::after {
-  content: ""; position: absolute; right: 0; bottom: 0;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--ok); box-shadow: 0 0 0 2px var(--s1);
-}
-.roster-chip .presence { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+.roster-chip .presence { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.roster-chip .presence.on, .roster-chip:not(.idle):not(.off) .presence { background: var(--ok); }
 .roster-chip.idle .presence { background: var(--warn); }
+.roster-chip.off .presence { background: var(--ink-4); }
 .roster-chip:hover { background: var(--s2); } /* hover-highlight in Listenform */
 .roster-chip.idle .avatar::after { background: var(--warn); }
 .roster-chip.unknown .avatar::after { background: none; border: 1.5px solid var(--line-3); }
@@ -1116,6 +1117,7 @@ html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, #composerInput::-w
 .roster-chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px 3px 4px; min-height: 26px;
+  width: fit-content; max-width: 100%; /* Pill = so breit wie Inhalt — keine Full-Bleed-Liste (GaRoN 21:28) */
   border-radius: var(--r-pill);
   background: var(--s2); border: 1px solid transparent;
   color: var(--ink-2); font-size: 12.5px; font-weight: 500;
