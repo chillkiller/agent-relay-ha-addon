@@ -49,7 +49,17 @@
   --ink-3: #8a8f98;
   --ink-4: var(--muted);
   --accent-tint: #a83c29;
-  /* metrics (claw): Basis-Radius 10 */
+  
+
+
+
+
+
+
+
+
+
+/* metrics (claw): Basis-Radius 10 */
   --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-pill: 9999px;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / .25);
@@ -746,9 +756,10 @@ body {
 /* ═══════════ Mobile (<860px): Drawer + kompakter Composer ═══════════ */
 @media (max-width: 860px) {
   :root { --sp-6: 16px; }
-  #app { grid-template-columns: 1fr; }
+  #app { display: block; height: 100vh; overflow: hidden; } /* 1-col: kein Grid-Überhang mehr (Mobil-Probe: 465px auf 390-Vw = 75px abgeschnitten) */
+  #main { height: 100vh; overflow-y: auto; display: flex; flex-direction: column; }
   #sidebar {
-    position: fixed; inset: 0 34% 0 0; z-index: 50; min-width: 270px;
+    position: fixed; inset: 0 34% 0 0; z-index: 50; min-width: 270px; max-width: 85vw;
     transform: translateX(-102%); transition: transform .18s ease;
     box-shadow: 0 0 60px rgba(0,0,0,.65);
   }
@@ -988,3 +999,70 @@ details.msg.turn.streaming > summary .turn-head-label { color: var(--accent-hove
 .bf { font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--s2); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 12px; }
 .bf.on { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-subtle, rgba(255,92,92,.12)); }
 .nav-badge { margin-left: 6px; font-size: 10px; font-weight: 700; background: var(--accent); color: #fff; border-radius: var(--r-pill); padding: 1px 7px; }
+
+/* ═══ Sidebar zuklappbar (Demo 14:07) ═══ */
+#app { grid-template-columns: var(--sidebar-w) 1fr; transition: grid-template-columns .16s ease; }
+#app.side-collapsed { grid-template-columns: 0px 1fr; }
+#app.side-collapsed #sidebar { overflow: hidden; border-right: 0; box-shadow: none; min-width: 0; padding: 0; }
+#sideCollapse { /* Rail-Button im side-head (Desktop + mobil sichtbar) */
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; flex: none;
+}
+#sideCollapse:hover { background: var(--s3); color: var(--ink); }
+/* Mobiler Voll-Overlay-Fall bleibt: body.sidebar-open schiebt von links
+   (bestehende Regel); collapse auf mobil = Overlay zu per < zurück */
+/* theme-toggle styling (mobil+desktop) */
+#themeToggle { display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; flex: none; }
+#themeToggle:hover { background: var(--s3); color: var(--ink); }
+#view-dashboard .view-back { display: inline-flex !important; } /* Übersicht bekommt den ← auch desktop */
+
+/* ═══ Sidebar zuklappbar (Demo 14:07) ═══ */
+#app { grid-template-columns: var(--sidebar-w) 1fr; transition: grid-template-columns .16s ease; }
+#app.side-collapsed { grid-template-columns: 0px 1fr; }
+#app.side-collapsed #sidebar { overflow: hidden; border-right: 0; box-shadow: none; min-width: 0; padding: 0; }
+#sideCollapse { /* Rail-Button im side-head (Desktop + mobil sichtbar) */
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; flex: none;
+}
+#sideCollapse:hover { background: var(--s3); color: var(--ink); }
+/* Mobiler Voll-Overlay-Fall bleibt: body.sidebar-open schiebt von links
+   (bestehende Regel); collapse auf mobil = Overlay zu per < zurück */
+/* theme-toggle styling (mobil+desktop) */
+#themeToggle { display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; flex: none; }
+#themeToggle:hover { background: var(--s3); color: var(--ink); }
+#view-dashboard .view-back { display: inline-flex !important; } /* Übersicht bekommt den ← auch desktop */
+
+/* Mobil-LAYOUT-FIX (Demo 14:28: halb abgehackt) */
+@media (max-width: 860px) {
+  .approval-banner, .pinned-banner { width: 100%; margin: 0 0 var(--sp-2); border-radius: var(--r-md); }
+  .messages { width: 100%; }
+  .composer { width: 100% !important; margin: 0 auto var(--sp-3) !important; }
+  .search-input { max-width: 38vw; }
+  .chat-head-row { flex-wrap: wrap; gap: 6px; }
+}
+
+
+/* ═══ Tag/Nacht-Theme (Demo 14:07) — dunkel = Default; hell = [data-theme="light"] ═══ */
+html[data-theme="light"] {
+  --bg: #f7f7f8; --bg-accent: #ffffff; --bg-elevated: #f1f1f3; --bg-hover: #e7e7ea;
+  --bg-muted: #e7e7ea; --card: #ffffff; --panel: #ffffff;
+  --text: #3a3a40; --text-strong: #191a1c; --chat-text: #333338;
+  --muted: #6e6e78; --muted-strong: #66666e;
+  --border: #e2e2e6; --border-strong: #cfcfd6; --border-hover: #b9b9c2;
+  --input: #ececee; --ring: #d14343;
+  --accent: #d14343; --accent-hover: #b93a3a; --accent-subtle: #d1434314;
+  --accent-glow: #d1434326; --accent-foreground: #ffffff;
+  --accent-tint: #f2c9c9;
+  --canvas: var(--bg); --s1: var(--bg-accent); --s2: var(--bg-elevated); --s3: var(--bg-hover); --s4: #dadade;
+  --line: var(--border); --line-2: var(--border-strong); --line-3: var(--border-hover);
+  --ink: var(--text-strong); --ink-2: var(--text); --ink-3: #83838c; --ink-4: var(--muted);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .08);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / .10);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / .14);
+}

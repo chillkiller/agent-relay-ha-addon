@@ -2245,8 +2245,33 @@
   function memberRole(aid) { return state.roomRoles?.[aid] || ""; }
 
 
-  boot();
-})();
+  // ── Demo-Feedback (GaRoN 14:07): Theme-Switch + Sidebar-Collapse ──
+  function applyTheme() {
+    const pref = (function () { try { return localStorage.getItem("relay.theme") || "dark"; } catch (e) { return "dark"; } })();
+    document.documentElement.setAttribute("data-theme", pref);
+    const btn = $("#themeToggle");
+    if (btn) btn.textContent = pref === "light" ? "☀️" : "🌙";
+  }
+  function applySideCollapse() {
+    const coll = (function () { try { return localStorage.getItem("relay.sideCollapsed") === "1"; } catch (e) { return false; } })();
+    const app = document.querySelector("#app");
+    if (app) app.classList.toggle("side-collapsed", coll);
+    const btn = $("#sideCollapse");
+    if (btn) { btn.textContent = coll ? "›" : "‹"; btn.title = coll ? "Seitenleiste auf" : "Seitenleiste zu"; }
+  }
+  $("#themeToggle")?.addEventListener("click", () => {
+    const now = document.documentElement.getAttribute("data-theme");
+    const next = now === "light" ? "dark" : "light";
+    try { localStorage.setItem("relay.theme", next); } catch (e) {}
+    applyTheme();
+  });
+  $("#sideCollapse")?.addEventListener("click", () => {
+    const now = document.querySelector("#app").classList.contains("side-collapsed");
+    try { localStorage.setItem("relay.sideCollapsed", now ? "0" : "1"); } catch (e) {}
+    applySideCollapse();
+  });
+  applyTheme();
+  applySideCollapse();
 
   // P2#7: Decision-Queue-Badge am Übersicht-Button (pending+unread live)
   async function updateDashBadge() {
@@ -2258,3 +2283,6 @@
     b.textContent = String(n);
   }
   
+
+  boot();
+})();

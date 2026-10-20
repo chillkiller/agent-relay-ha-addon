@@ -11,7 +11,10 @@
     <!-- ═══════════ Sidebar (DNA: Nav klein oben → Räume → Projekte → Team → Identity) ═══════════ -->
     <aside id="sidebar">
       <header class="side-head">
-        <div class="brand"><span class="brand-glyph">⌁</span><span id="brandName">Agent Relay</span></div>
+        <div class="brand"><span class="brand-glyph">⌁</span><span id="brandName">Agent Relay</span></div><div style="display:flex;gap:4px;margin-left:auto">
+            <button id="themeToggle" title="Tag/Nacht umschalten" aria-label="Tag/Nacht">🌙</button>
+            <button id="sideCollapse" title="Seitenleiste zu" aria-label="Seitenleiste zu">‹</button>
+          </div>
       </header>
 
       <!-- Views: kleine Nav-Zeile OBEN (Control-UI-Style, nicht einklappbar) -->
@@ -125,6 +128,7 @@
       <!-- Einstellungen -->
       <section class="view" id="view-dashboard" hidden>
         <header class="view-head">
+          <button class="icon-btn view-back" aria-label="Zurück zu den Räumen">←</button>
           <h2>Übersicht</h2>
           <span class="hint" id="dashStamp"></span>
         </header>
