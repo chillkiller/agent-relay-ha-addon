@@ -2,7 +2,7 @@
 # Multi-stage build: prebuilt Go binary (cross-compiled, CGO off) + SPA.
 # The Supervisor builds this on the device via buildx (no Go toolchain needed).
 name: Agent Relay
-version: "0.1.1"
+version: "0.2.0"
 slug: agent_relay
 description: Multi-Agent-Relay für die HA-Sidebar — buzz-artige Multi-Agent-Chats mit Paperclip-artiger Projektverwaltung
 url: https://github.com/GaRoN/agent-desktop-ha-app

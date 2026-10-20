@@ -11,7 +11,7 @@ ENV LC_ALL=C.UTF-8
 
 # HA OCI labels (required when not using the GitHub builder flow)
 LABEL io.hass.type="app" \
-      io.hass.version="0.1.0" \
+      io.hass.version="0.2.0" \
       io.hass.arch="aarch64 amd64"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
