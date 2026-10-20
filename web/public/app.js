@@ -482,8 +482,8 @@
               ${r.projectId ? 'data-proj="1"' : ""} draggable="false">
         ${r.kind === "dm" ? '<span class="room-ico dm-ico">🔒</span>' : `<span class="room-ico">${r.projectId ? "🗂" : "#"}</span>`}${dot}
         <span class="room-text" style="flex:1;min-width:0;text-align:left">
-          <span class="marquee marquee__text" style="display:block">${esc(r.name)}</span>
-          <span class="room-sub" style="display:block">${sub}</span>
+          <span class="marquee marquee__text" style="display:block">${r.kind === "dm" ? `Session · ${esc(roomTimestamp(r.id))}` : esc(r.name)}</span>
+          <span class="room-sub" style="display:block">${r.kind === "dm" ? esc(roomSubtitle(r.id).replace(/\s+/g, " ").slice(0, 60) || "—") : sub}</span>
         </span>
         <span class="room-actions">
           <span class="room-action" data-act="rename" data-room="${r.id}" title="Umbenennen">✎</span>
@@ -573,7 +573,7 @@
           <div class="nav-group-body">${[...byTarget.entries()].map(([aid, ss]) => memberBlock(aid, ss)).join("")}</div>
         </div>`;
       })();
-      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
+      const roomGroupsHtml = group("RÄUME", rooms_.filter((r) => r.kind === "chat")) + group("PROJEKTE", projLinked);
       // group() liefert bereits room-group markup — direkt einhängen + Team anhängen
       mount.innerHTML = roomGroupsHtml + chatsHtml + teamHtml;
       bindSidebarGroups(mount);
@@ -584,7 +584,7 @@
       const qa = mount.querySelector("#newAgentQuick"); if (qa) qa.addEventListener("click", () => agentModal());
     } else {
       const projLinked = state.rooms.filter((r) => r.projectId && r.humanMember !== false);
-    el.innerHTML = group("STREAMS", rooms_.filter((r) => r.kind !== "dm")) + group("PROJEKTE", projLinked) + group("AUSGELADEN", ghost);
+    el.innerHTML = group("STREAMS", rooms_.filter((r) => r.kind !== "dm")) + group("PROJEKTE", projLinked);
     }
 
     // B1: toggle persistence (Control-UI-Muster: aria-expanded + chevron rotation)
@@ -735,6 +735,16 @@
       badge.textContent = open;
       badge.hidden = open === 0;
     } catch { badge.hidden = true; }
+  }
+
+  // roomTimestamp (GaRoN 20:58: DM-Sessions heißen „Session · HH:MM“ statt
+  // Namens-Doppler des Mitglieds): letzte Aktivität aus dem Raum-Zustand.
+  function roomTimestamp(roomId) {
+    const msgs = state.messages[roomId] || [];
+    const last = msgs[msgs.length - 1];
+    if (!last) return "neu";
+    const d = new Date(last.createdAt);
+    return isNaN(d) ? "neu" : fmtTime(last.createdAt);
   }
 
   function renderMemberChips(room) {
