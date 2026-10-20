@@ -50,7 +50,7 @@ func main() {
 	rt.Register(adapter.OpenAI{})
 	rt.Register(adapter.OpenClaw{})
 
-	srv := api.New(st, rt)
+	srv := api.New(st, rt, dataDir)
 	if tok := os.Getenv("RELAY_BEARER_TOKEN"); tok != "" {
 		srv.SetBearer(tok)
 		log.Println("[relay] API bearer gate enabled (RELAY_BEARER_TOKEN)")
