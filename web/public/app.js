@@ -4,6 +4,10 @@
   "use strict";
 
   const HUMAN = "human"; // Pseudo-ID für den eigenen Chip im Roster
+  // Weg C (Votum 22:15): SVG-Icon-System übernimmt UI-Chrome (Nav/Composer);
+  // Quelle: icons.js (ES-Module, per script type=module geladen) — hier nur
+  // der Konsum-Shim (graceful, wenn Module nicht geladen: Emoji-Fallback).
+  function icon(name, size = 16) { return (window.__relayIcons?.icon?.(name, size)) || ""; }
 
   const state = {
     view: "chat",

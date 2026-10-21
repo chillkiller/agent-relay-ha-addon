@@ -1,0 +1,40 @@
+/* ═══ design-system.css — Weg C (opencode-Votum 22:15): die DNA-Schicht
+   ÜBER den Tokens. buzz-Demo-Referenz (shots/buzz-ref/) + Control-UI-CSS.
+   Regeln: nur Kompositions-Muster, keine Farbwerte (die leben in tokens.css). ═══ */
+
+/* — Sidebar-Formel (Control-UI: color-mix 96/4) — war im Votum 0× — */
+#sidebar { background: color-mix(in srgb, var(--bg) 96%, var(--bg-elevated) 4%); }
+
+/* — Sidebar-Fade-Masken (Scroll-Ränder, Control-UI-Muster) war 0× — */
+#roomScroll {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent 100%);
+}
+
+/* — Shadow-Anwendung (Tokens existierten, wurden kaum benutzt) — */
+.card, .dash-card, #modal { box-shadow: var(--shadow-sm); }
+#modal { box-shadow: var(--shadow-lg); }
+.composer { box-shadow: var(--shadow-md) !important; } /* hebt vom Canvas ab (buzz-Referenz) */
+
+/* — Focus-Ring doppelt (Control-UI: 2px bg + 4px text) — war 0× — */
+:focus-visible {
+  outline: 2px solid var(--bg-elevated);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* — Superellipse-Composer-Kante (Control-UI-Charakterzug) — */
+@supports (corner-shape: superellipse(1.5)) {
+  .composer { corner-shape: superellipse(1.5); }
+}
+
+/* — Avatar-Saturate-Spiel im Chat (buzz-Referenz: nicht-aktive gedimmt) — */
+.msg.off .avatar, .msg.idle .avatar { filter: saturate(.55); opacity: .75; }
+
+/* — EmptyState-Komponente (Votum: fehlt strukturell) — */
+.empty-state { border: 1px dashed var(--line-2); border-radius: var(--r-lg); background: color-mix(in srgb, var(--s1) 70%, transparent); }
+.empty-state .big { font-size: 34px; filter: grayscale(.3) saturate(.8); }
+
+/* — Day-Divider (buzz: dezente Mittellinie + Label) — */
+.messages .day-line, .day-divider { display: flex; align-items: center; gap: 10px; }
+.messages .day-line::before, .messages .day-line::after { content: ""; flex: 1; height: 1px; background: var(--line); }

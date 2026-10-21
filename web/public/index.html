@@ -22,11 +22,11 @@
         <!-- GaRoN 21:10: Nav = aufklappbares Menü in der Identity-Card;
              die Icon-Liste hier ist veraltet (bleibt als Hidden-Fallback für
              switchView-Anker). Buttons: Settings/Übersicht wandern ins Menü. -->
-        <button class="nav-btn" data-view="chat"><span class="nav-ico">💬</span>Räume</button>
-        <button class="nav-btn" data-view="agents"><span class="nav-ico">🤖</span>Agents</button>
-        <button class="nav-btn" data-view="projects"><span class="nav-ico">🗂</span>Projekte</button>
-        <button class="nav-btn" data-view="settings"><span class="nav-ico">⚙️</span>Einstellungen</button>
-        <button class="nav-btn" data-view="dashboard"><span class="nav-ico">📊</span>Übersicht<span class="nav-badge" id="dashBadge" hidden></span></button>
+        <button class="nav-btn" data-view="chat"><span class="nav-ico" data-icon="chat"></span>Räume</button>
+        <button class="nav-btn" data-view="agents"><span class="nav-ico" data-icon="agents"></span>Agents</button>
+        <button class="nav-btn" data-view="projects"><span class="nav-ico" data-icon="folder"></span>Projekte</button>
+        <button class="nav-btn" data-view="settings"><span class="nav-ico" data-icon="gear"></span>Einstellungen</button>
+        <button class="nav-btn" data-view="dashboard"><span class="nav-ico" data-icon="chart"></span>Übersicht<span class="nav-badge" id="dashBadge" hidden></span></button>
       </nav>
 
       <!-- RÄUME + PROJEKTE: der Haupt-Inhalt (renderRoomList befüllt) -->
@@ -192,6 +192,13 @@
   <div id="popLayer" hidden></div>
   <div id="modalWrap" class="modal-wrap" hidden><div id="modal" role="dialog" aria-modal="true"></div></div>
 
+  <script type="module">
+    // Weg C (Votum 22:15): icons.js als ES-Module → window.__relayIcons-Shim
+    // (app.js bleibt klassisches Script; Konsum siehe icon()-Funktion in app.js)
+    import { icon, applyIcons } from "./icons.js";
+    window.__relayIcons = { icon, applyIcons };
+    document.addEventListener("DOMContentLoaded", () => applyIcons());
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
