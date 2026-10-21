@@ -5,8 +5,8 @@
    Inter (Fallback system-ui); JetBrains-Mono-Nähe für Maschinenwerte.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* Design-Sprache: OpenClaw Control-UI (claw-dark), 1:1 aus der Quelle
-
+/* Design-Quelle: OpenClaw Control-UI (claw-dark, docs/DESIGN.md §4) —
+   Token-Definitionen leben in tokens.css (Weg C, Votum 22:15). */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
