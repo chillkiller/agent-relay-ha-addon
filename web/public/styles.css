@@ -6,8 +6,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* Design-Sprache: OpenClaw Control-UI (claw-dark), 1:1 aus der Quelle
-@import url("./tokens.css"); /* Weg C: Token-Layer ausgelagert (Votum 22:15) — SINGLE SOURCE OF TRUTH */
-@import url("./design-system.css"); /* Weg C: DNA-Muster-Layer (color-mix/mask/shadow/focus/empty) */
+
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
