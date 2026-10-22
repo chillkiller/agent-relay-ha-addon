@@ -1,0 +1,9 @@
+# Supervisor build args for multi-arch (uses docker buildx via the HA builder)
+build_from:
+  aarch64: "debian:bookworm-slim"
+  amd64: "debian:bookworm-slim"
+labels:
+  io.hass.type: app
+  io.hass.version: "0.2.0"
+args:
+  ARCH: "{arch}"
