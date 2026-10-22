@@ -14,7 +14,7 @@ Ein Go-Binary (~11 MB, statisch), SQLite (modernc, pure-Go), Embedded-SPA.
 **Rolle**: Desktop-artige Oberfläche für Agent-Orchestrierung (wie OpenClaw Control UI),
 die externe Agent-Laufzeiten **benutzt** (OpenClaw-Gateway, Ollama, …) statt sie zu enthalten.
 
-**Repo**: `/mnt/192.168.178.68/share/projekte/github/agent-desktop-ha-app`
+**Repo**: `/mnt/smb-example.local/share/projekte/github/agent-desktop-ha-app`
 **Branch**: `development`, **HEAD**: `88a315a` (+ 3 weitere Commits bis `3391123`-Linie —
 alle committed, Vet grün), **17 Commits seit 2026-10-18**.
 **Live-Server**: Port 8099 (nicht persistent gestartet — siehe Server-Start unten).

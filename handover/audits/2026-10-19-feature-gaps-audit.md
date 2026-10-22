@@ -2,7 +2,7 @@
 
 **Datum:** 2026-10-19  
 **Modus:** Review-Only — kein Bau  
-**Scope:** `/mnt/192.168.178.68/share/projekte/github/agent-desktop-ha-app` (Agent Relay, HEAD ~e2cc4bc+) im Vergleich mit buzz (`/tmp/re-buzz`) und paperclip (`/tmp/re-paperclip`).
+**Scope:** `/mnt/smb-example.local/share/projekte/github/agent-desktop-ha-app` (Agent Relay, HEAD ~e2cc4bc+) im Vergleich mit buzz (`/tmp/re-buzz`) und paperclip (`/tmp/re-paperclip`).
 
 ---
 

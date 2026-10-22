@@ -7,7 +7,7 @@ es selbst bewertet". Du arbeitest es weiter — **nicht ab**,weiter.
 
 ## Sofort lesen (in dieser Reihenfolge)
 
-1. /mnt/192.168.178.68/share/projekte/github/agent-desktop-ha-app/HANDOVER.md — die komplette Betriebs-übergabe (11 Abschnitte: Projekt, Architektur, Loop, Infra, Pfade, offener Plan, Fallstricke, deine Verantwortungen)
+1. /mnt/smb-example.local/share/projekte/github/agent-desktop-ha-app/HANDOVER.md — die komplette Betriebs-übergabe (11 Abschnitte: Projekt, Architektur, Loop, Infra, Pfade, offener Plan, Fallstricke, deine Verantwortungen)
 2. /mnt/.../agent-desktop-ha-app/ARCHITECTURE.md + docs/DESIGN.md (+ REVERSE-ENGINEERING.md, design-basis.md)
 3. handover/designer/ — der Vision-Loop über 11 Runden: SESSION-DESTILLAT.md (GaRoNs Direktweisungen!), BIAS.md (12 Regeln), review-tracker.md (Kette), die 13 Berichte, die Persona-Dateien
 4. handover/audits/ — Codex' 31-Lücken-Matrix (P1/P2/P3) + der Runde-1-Review
