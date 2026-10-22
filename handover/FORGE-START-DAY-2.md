@@ -16,7 +16,7 @@ Der heutige Tag hat einen strukturellen Crash hinterlassen — HTTPS tot, GaRoN 
 5. exec-Claim-Fälle: je Fall prüfen (ss/proc), nie Klassen-Urteile aus 3 Probes
 6. **META:** GaRoNs 65 %-Bewertung war der ehrliche Anker; mein 90 %+ war Werkstatt-Optimismus — mein Selbstvermaß war größer als die Kontrolle. Vor jedem Bericht: Was ist BEWIESEN, was ist behauptet?
 
-**Service-Port-Lektion (18:41, GaRoNs Tipp):** Der saubere Weg existierte von Anfang an — `agent-relay/config.yaml:26`: `ports: "8099/tcp": 8099` + `ports_description: "Direkter Zugang zur Relay-UI (volles Fenster, kein Ingress)"` = der Development-/Service-Port. LAN-Zugang `http://192.168.178.68:8099/` war beweisbar GESEN seit 09:38 (200-Probe). Ich übersprang den Contract und baute die nginx-Brücke — der Schaden war selbstgemacht für ein Problem, das keins war.
+**Service-Port-Lektion (18:41, GaRoNs Tipp):** Der saubere Weg existierte von Anfang an — `agent-relay/config.yaml:26`: `ports: "8099/tcp": 8099` + `ports_description: "Direkter Zugang zur Relay-UI (volles Fenster, kein Ingress)"` = der Development-/Service-Port. LAN-Zugang `http://198.51.100.68:8099/` war beweisbar GESEN seit 09:38 (200-Probe). Ich übersprang den Contract und baute die nginx-Brücke — der Schaden war selbstgemacht für ein Problem, das keins war.
 **+ Lektion 6b: VOR jedem Infrastruktur-Eingriff: der komplette Add-on-Contract (config.yaml: ports/ingress/panel/host_network) — erst Contract lesen, dann denken, dann fragen, dann handeln.**
 
 ---
