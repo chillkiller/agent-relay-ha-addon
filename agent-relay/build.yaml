@@ -4,6 +4,6 @@ build_from:
   amd64: "debian:bookworm-slim"
 labels:
   io.hass.type: app
-  io.hass.version: "0.2.0"
+  io.hass.version: "0.2.1"
 args:
   ARCH: "{arch}"
