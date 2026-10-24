@@ -17,6 +17,7 @@ const http = require("node:http");
 const net = require("node:net");
 const fs = require("node:fs");
 const path = require("node:path");
+const { createRosterSync } = require("./gateway-roster.js");
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -55,6 +56,16 @@ const MIME = {
 
 const BUILD_ID_RE = /data-openclaw-control-ui-build-id="([^"]+)"/;
 
+/* Overlay-Injektion: relay-dna.js + boot-tag ins <head>-Ende (vor </head>) */
+function injectOverlay(html) {
+  if (!process.env.RELAY_OVERLAY || process.env.RELAY_OVERLAY === "0") return html;
+  if (html.includes("/relay-dna.js")) return html; // idempotent
+  const bootTag = process.env.RELAY_LAUNCH_TOKEN
+    ? "<script>window.__RELAY_LAUNCH__=" + JSON.stringify({ gatewayUrl: (process.env.RELAY_LAUNCH_GW_URL || ((process.env.GW_HOST || "127.0.0.1") + ":" + (process.env.GW_PORT || ""))), token: process.env.RELAY_LAUNCH_TOKEN, mode: process.env.RELAY_LAUNCH_MODE || "" }) + "</script>"
+    : "";
+  return html.replace("</head>", '<script src="/relay-dna.js" data-relay-overlay="1"></script>' + bootTag + "</head>");
+}
+
 function stampIndex(raw) {
   let html = raw;
   // (1) html-Attribute: base-path leer + terminal-Flag (Gateway-Stamp, diff-bewiesen);
@@ -84,7 +95,7 @@ function readIndex() {
   const st = fs.statSync(file);
   if (st.mtimeMs !== indexCache.mtime) {
     const raw = fs.readFileSync(file, "utf8");
-    indexCache = { mtime: st.mtimeMs, raw, stamped: stampIndex(raw) };
+    indexCache = { mtime: st.mtimeMs, raw, stamped: injectOverlay(stampIndex(raw)) };
   }
   return indexCache;
 }
@@ -120,28 +131,41 @@ function serveStatic(req, res, pathnameIn) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" });
       return res.end(idx.stamped);
     }
-    // Kompressions-Varianten (.br/.gz) wenn der Client sie annimmt
+    // Kompressions-Varianten (.br/.gz) wenn der Client sie annimmt — Content-Length
+    // MUSS die Größe des SERVIERTEN (komprimierten) Streams sein (Gateway beweist 45
+    // für 45-Byte-entry-br; Rohgröße trunciert im Browser → Module stumm, bewiesen)
     const ae = String(req.headers["accept-encoding"] || "");
     const ext = path.extname(file);
-    const wantBr = ae.includes("br") && fs.existsSync(file + ".br");
-    const wantGz = !wantBr && ae.includes("gzip") && fs.existsSync(file + ".gz");
+    const mimeType = MIME[ext] || "application/octet-stream";
     const headers = {
-      "Content-Type": MIME[ext] || "application/octet-stream",
+      "Content-Type": mimeType,
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "/assets/|/fonts/".includes("/" + rel.split("/")[1] + "/") ? "public, max-age=31536000, immutable" : "no-cache",
     };
-    if (wantBr) { headers["Content-Encoding"] = "br"; return streamFile(file + ".br", res, headers, st); }
-    if (wantGz) { headers["Content-Encoding"] = "gzip"; return streamFile(file + ".gz", res, headers, st); }
-    streamFile(file, res, headers, st);
+    if (ae.includes("br") && fs.existsSync(file + ".br")) {
+      headers["Content-Encoding"] = "br";
+      return streamFile(file + ".br", res, headers);
+    }
+    if (ae.includes("gzip") && fs.existsSync(file + ".gz")) {
+      headers["Content-Encoding"] = "gzip";
+      return streamFile(file + ".gz", res, headers);
+    }
+    streamFile(file, res, headers);
   });
 }
 
-function streamFile(file, res, headers, st) {
-  headers["Content-Length"] = st.size;
-  res.writeHead(200, headers);
-  if (req_ === "HEAD") return res.end();
-  fs.createReadStream(file).pipe(res);
+function streamFile(file, res, headers) {
+  fs.stat(file, (err, st2) => {
+    if (err) return sendError(res, 500, "stream stat failed");
+    headers["Content-Length"] = st2.size;
+    res.writeHead(200, headers);
+    if (req_ === "HEAD") return res.end();
+    fs.createReadStream(file).pipe(res);
+  });
 }
+
+/* Roster-Sync (gateway-roster.js) — Server-seitige agents.list-Loop */
+let roster = null;
 let req_ = "GET"; // roher GET/POST-Track für streamFile (HEAD-Sonderfall)
 
 /* ---------------- Zusatz-API ---------------- */
@@ -171,7 +195,7 @@ function api(res, method, pathname, body) {
         return json(201, task);
       }
     }
-    if (pathname === "/api/registry" && method === "GET") return json(200, { agents: state.registry });
+    if (pathname === "/api/registry" && method === "GET") return json(200, { agents: (roster && roster.state.agents.length ? roster.state.agents : state.registry), gateway: roster ? { connected: roster.state.connected, serverVersion: roster.state.serverVersion, connId: roster.state.connId, methods: roster.state.methods, lastSyncAt: roster.state.lastSyncAt, error: roster.state.error } : null });
     if (pathname.startsWith("/api/rooms/") && method === "GET") {
       const id = pathname.split("/")[3];
       const room = state.rooms.find((r) => r.id === id);
@@ -193,7 +217,7 @@ function api(res, method, pathname, body) {
 
 /* ---------------- Server ---------------- */
 const server = http.createServer((req, res) => {
-  req_ = req.method === "HEAD" ? "HEAD" : "GET";
+  req_ = req.method === "HEAD" ? "HEAD" : req.method;
   const u = new URL(req.url, "http://localhost");
   const pathname = u.pathname;
   const chunks = [];
@@ -202,19 +226,42 @@ const server = http.createServer((req, res) => {
     let body = {};
     if (chunks.length) { try { body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch { body = {}; } }
     if (pathname.startsWith("/api/")) return api(res, req.method, pathname, body);
-    return serveStatic(req_ === "HEAD" ? { headers: req.headers, "accept-encoding": req.headers["accept-encoding"] } : req, res, pathname);
+    if (pathname === "/launch" && req_ !== "HEAD") {
+      // UI-Launch-Lane (Onboarding): gatewayUrl+token als HASH-FRAGMENT (bundle-Beweis:
+      // SPA akzeptiert #token=; Query warnt+cleanup). Token verlässt den Prozess nur in
+      // dieses eine HTML-Gerüst an den anfragenden Browser (LAN-Lane, GaRoN-Instanz).
+      const tok = process.env.RELAY_LAUNCH_TOKEN || "";
+      const gurl = process.env.RELAY_LAUNCH_GW_URL || (GW_HOST + ":" + GW_PORT);
+      const frag = tok ? ("#gatewayUrl=" + encodeURIComponent(gurl) + "&token=" + encodeURIComponent(tok)) : ("#gatewayUrl=" + encodeURIComponent(gurl));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" });
+      return res.end('<!doctype html><meta http-equiv="refresh" content="0;url=/' + frag.replace(/"/g, "&quot;") + '"><body>UI-Launch…</body>');
+    }
+    if (pathname === "/relay-dna.js") {
+      const f = path.join(__dirname, "relay-dna.js");
+      if (fs.existsSync(f)) {
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-cache" });
+        return fs.createReadStream(f).pipe(res);
+      }
+      return sendError(res, 404, "overlay missing");
+    }
+    return serveStatic(req_ === "HEAD" ? req : req, res, pathname);
   });
   req.on("error", () => {});
 });
 
-/* /ws Pass-through: HTTP-Upgrade → raw TCP zum Gateway (Frames unberührt) */
+/* /ws Pass-through: HTTP-Upgrade → raw TCP zum Gateway (Frames unberührt).
+   JEDER WS-Upgrade wird durchgeleitet: die SPA defaultet auf `location.host`+"/ws"
+   (Konsole bewies ws://127.0.0.1:8787/-Aufrufe) — nur Nicht-/ws-Pfade antworten 404. */
 server.on("upgrade", (req, socket, head) => {
-  if (!new URL(req.url, "http://localhost").pathname.startsWith("/ws")) {
+  const pathname = new URL(req.url, "http://localhost").pathname;
+  // JEDER Upgrade wird zum Gateway durchgeleitet (SPA ruft '/' und '/ws' per WS):
+  if (!(pathname === "/ws" || pathname === "/")) {
     socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
     return socket.destroy();
   }
   const upstream = net.connect(GW_PORT, GW_HOST, () => {
-    let reqLines = req.method + " " + req.url + " HTTP/1.1\r\n";
+    // URL der Anfrage IMMER auf Gateway-/ws mapen (SPA ruft auch "/" per WS auf):
+    let reqLines = req.method + " /ws HTTP/1.1\r\n";
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i], v = req.rawHeaders[i + 1];
       if (/^host$/i.test(k)) { reqLines += "Host: " + GW_HOST + ":" + GW_PORT + "\r\n"; continue; }
@@ -239,5 +286,6 @@ server.on("upgrade", (req, socket, head) => {
 server.on("request", () => {});
 
 server.listen(PORT, HOST, () => {
-  console.log(`[relay-server] pid=${process.pid} listening http://${HOST}:${PORT} → ui=${UI_ROOT} | /ws → ${GW_HOST}:${GW_PORT}`);
+  roster = createRosterSync({ gwHost: GW_HOST, gwPort: GW_PORT, refreshMs: 20000 });
+  console.log(`[relay-server] pid=${process.pid} listening http://${HOST}:${PORT} → ui=${UI_ROOT} | /ws → ${GW_HOST}:${GW_PORT} | overlay=${process.env.RELAY_OVERLAY ? "on" : "off"} | launch=${process.env.RELAY_LAUNCH_TOKEN ? "on" : "off"}`);
 });
