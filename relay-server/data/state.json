@@ -1,0 +1,22 @@
+{
+  "rooms": [
+    {
+      "id": "rm_mvmbsv6g",
+      "kind": "chat",
+      "name": "Test-Raum",
+      "topic": "",
+      "createdAt": 1792841940952
+    }
+  ],
+  "tasks": [
+    {
+      "id": "tk_mvmbsv8b",
+      "projectId": "",
+      "title": "Klon-Beweis",
+      "status": "todo",
+      "createdAt": 1792841941019
+    }
+  ],
+  "registry": [],
+  "onboarding": {}
+}
