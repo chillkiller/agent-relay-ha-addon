@@ -1,0 +1,48 @@
+# Agent Relay UI — Control-UI-Klon als HA-Sidebar-App (Phase-3-Form)
+# Beweis-Vertrag: agent_relay config.yaml (ingress/panel/watchdog) — bewiesener Weg.
+name: Agent Relay UI
+version: "0.3.0"
+slug: agent_relay_ui
+description: Control-UI-Klon (OpenClaw) als eigenständiger Front-Server in der HA-Sidebar — buzz/Hermes/Paperclip-Erweiterungen
+url: https://github.com/chillkiller/agent-relay-ha-addon
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+host_network: false
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+panel_title: Agent Relay UI
+panel_icon: mdi:robot-outline
+panel_admin: false
+
+ports:
+  "8099/tcp": 8099
+ports_description:
+  "8099/tcp": Direkter Zugang zur UI (volles Fenster, kein Ingress)
+webui: "http://[HOST]:[PORT:8099]/"
+
+watchdog: "http://[HOST]:8099/api/health"
+timeout: 60
+backup: hot
+
+# Der OpenClaw-Gateway (andere Add-on-Instanz) wird über addon_configs-Lane gelesen
+# (bewiesener Pfad). Falls Token hier gesetzt wird, überschreibt es die Config-Lane.
+map:
+  - type: addon_config
+    read_only: true
+
+options:
+  gw_host: "45b315ab-openclaw-ha-addon"  # HA-Addon-Hostname (DNS im HA-Netz)
+  gw_port: 18789
+  openclaw_token: ""
+  log_level: info
+
+schema:
+  gw_host: str?
+  gw_port: port?
+  openclaw_token: password?
+  log_level: list(info|debug|warn|error)?

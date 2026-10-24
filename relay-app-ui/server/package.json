@@ -1,0 +1,13 @@
+{
+  "name": "relay-server",
+  "version": "0.1.0",
+  "description": "Eigenständiger Frontend-Server für den Control-UI-Klon (HA-Addon-Kern): static + stamp + /ws pass-through + slim APIs. 0 Runtime-Dependencies.",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=22" },
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  }
+}
